@@ -14,12 +14,11 @@
 //           Fix B: hasActiveTextTrack — Fonte 2 silenciada quando Fonte 1 ativa
 // v1.6.1 — reset hasActiveTextTrack ao desligar/religar narrador
 //           (garante que Fonte 2 volta como fallback em players sem TextTrack)
+// v1.7.0 — remove logs de debug (producao limpa)
 
 (function () {
   if (window.__oracleCCLoaded) return;
   window.__oracleCCLoaded = true;
-
-  console.log("[Oracle CC] Content script iniciado (v1.6.1).");
 
   // =========================================================================
   // ESTADO
@@ -76,7 +75,6 @@
         if (r.ttsRate      !== undefined) ttsRate    = r.ttsRate;
         if (r.ttsVolume    !== undefined) ttsVolume  = r.ttsVolume;
         if (r.sourceLang   !== undefined) sourceLang = r.sourceLang;
-        console.log(`[Oracle CC] Config — enabled:${isEnabled} voz:${ttsVoice} rate:${ttsRate} lang:${sourceLang}`);
       }
       bootObservers();
     }
@@ -89,15 +87,13 @@
       if (!isEnabled) {
         speakQueue.length = 0;
         isSpeaking = false;
-        hasActiveTextTrack = false; // v1.6.1 — reset para fallback funcionar no proximo video
+        hasActiveTextTrack = false;
         chrome.runtime.sendMessage({ type: "STOP" }).catch(() => {});
         safeSet({ readerStatus: "off" });
-        console.log("[Oracle CC] Narrador desligado.");
       } else {
-        console.log("[Oracle CC] Narrador ligado — varrendo videos existentes.");
         speakQueue.length = 0;
         isSpeaking = false;
-        hasActiveTextTrack = false; // v1.6.1 — reset: deixa Fonte 2 pronta caso nao haja TextTrack
+        hasActiveTextTrack = false;
         spokenCache.clear();
         rawSeenCache.clear();
         document.querySelectorAll("video").forEach(video => {
@@ -206,10 +202,8 @@
     spokenCache.add(clean);
     setTimeout(() => spokenCache.delete(clean), 30000);
 
-    // FIX A — descarta entradas antigas se fila ja atingiu o limite
     while (speakQueue.length >= MAX_QUEUE_SIZE) {
-      const dropped = speakQueue.shift();
-      console.log("[Oracle CC] Fila cheia — descartando cue antigo:", dropped?.slice(0, 40));
+      speakQueue.shift();
     }
 
     speakQueue.push(clean);
@@ -285,7 +279,6 @@
           if (now < cue.startTime - 0.3 || now > cue.endTime + 0.3) continue;
         }
 
-        // FIX B — sinaliza que Fonte 1 esta ativa; Fonte 2 sera silenciada
         hasActiveTextTrack = true;
 
         const text = cue.text
@@ -295,7 +288,6 @@
         pipeline(text, null);
       }
     });
-    console.log(`[Oracle CC] TextTrack: lang="${track.language ?? "?"}" label="${track.label ?? ""}"`);
   }
 
   function attachVideo(video) {
@@ -304,10 +296,8 @@
     if (observedVideos.has(video)) return;
     observedVideos.add(video);
     video.textTracks.addEventListener("addtrack", (e) => {
-      console.log(`[Oracle CC] addtrack: "${e?.track?.label ?? "?"}"`);
       attachTrack(e?.track, video);
     });
-    console.log(`[Oracle CC] Video anexado.`);
   }
 
   // =========================================================================
@@ -335,7 +325,6 @@
   function startDOMObserver() {
     if (domObserver) return;
     domObserver = new MutationObserver((mutations) => {
-      // FIX B — Fonte 1 ativa: ignora Fonte 2 completamente
       if (hasActiveTextTrack) return;
 
       for (const mutation of mutations) {
@@ -357,7 +346,6 @@
       }
     });
     domObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
-    console.log("[Oracle CC] MutationObserver DOM ativo (Fonte 2 — fallback).");
   }
 
   // =========================================================================
@@ -379,7 +367,6 @@
         }
       });
       videoScanObserver.observe(document.body, { childList: true, subtree: true });
-      console.log("[Oracle CC] videoScanObserver ativo.");
     }
 
     startDOMObserver();
