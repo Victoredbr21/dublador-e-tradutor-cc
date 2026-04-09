@@ -1,257 +1,343 @@
 # 🎤 Oracle CC Narrator
 
-> Extensão para Google Chrome que lê em voz alta as legendas dos cursos **Oracle MyLearn** — tradução automática para PT-BR inclusa.
+> Extensão para Google Chrome que lê em voz alta as legendas dos cursos **Oracle MyLearn** — tradução automática para PT-BR incluída, sincronizada em tempo real com o player.
 
-![Status](https://img.shields.io/badge/status-beta-yellow) ![Manifest](https://img.shields.io/badge/manifest-v3-blue) ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green)
+![Status](https://img.shields.io/badge/status-beta-yellow) ![Versão](https://img.shields.io/badge/vers%C3%A3o-2.0.0-blue) ![Manifest](https://img.shields.io/badge/manifest-v3-blue) ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green)
 
 ---
 
-## 📌 O que faz
+## 📌 O que é isso?
 
-O Oracle MyLearn usa o player **Brightcove (Video.js)** com legendas no formato **WebVTT**. A extensão intercepta essas legendas diretamente pela **TextTrack API** do navegador, traduz os textos em inglês via Google Translate (sem chave de API) e narra tudo em português usando o motor de voz nativo do Chrome (`chrome.tts`).
+Os cursos do Oracle MyLearn são em inglês. Essa extensão lê as legendas do vídeo, traduz para português em tempo real e narra em voz alta — sincronizada ao segundo exato do vídeo.
 
-### Funcionalidades
+**Funciona assim:**
+- Você assiste o vídeo normalmente
+- A extensão lê a legenda do momento exato em que o vídeo está
+- Se você voltar 30 segundos, o narrador volta junto
+- Se você pausar, o narrador para na hora
+- Se você avançar, o narrador acompanha sem atrasar nem adiantar
 
-- ▶️ **Master Switch** — botão liga/desliga com memória de estado
-- 🔊 **Seletor de voz** — Antonio, Francisca, Thalita e mais 10 vozes neurais PT-BR/PT-PT
-- 🌎 **Seletor de idioma** — detectar automático ou fixar inglês, espanhol, francês, alemão etc.
-- ⏩ **Controle de velocidade** — 0.5× a 2.0×
-- 🔉 **Controle de volume** do narrador
-- 📺 **Display de CC** — mostra a legenda original e a tradução em tempo real no popup
-- 🛡️ **Tratamento de erros** completo (EX-1 a EX-4): sem lixo vermelho no console
+### 🚀 Funcionalidades
+
+- ▶️ **Botão liga/desliga** com memória de estado (lembra se estava ligado)
+- 🔊 **Seletor de voz** — vozes PT-BR nativas do seu browser
+- 🌎 **Seletor de idioma** — detecta automático ou você fixa (inglês, espanhol etc.)
+- ⏩ **Velocidade ajustável** — de 0.5× a 2.0×
+- 🔉 **Volume independente** do vídeo
+- 📺 **Display de legenda** no popup: mostra o texto original e a tradução em tempo real
+- 🔄 **Cache de tradução** — pré-traduz todos os cues ao carregar o vídeo, zero delay
+- 🛑 **Sincronização perfeita** — guiada pelo `currentTime` do player, não por fila
 
 ---
 
 ## 🖥️ Requisitos
 
-- Google Chrome **versão 116 ou superior** (Manifest V3)
-- Windows, macOS ou Linux com vozes de síntese de voz instaladas
+- **Google Chrome** versão 116 ou superior (ou Brave, Edge baseado em Chromium)
+- Windows, macOS ou Linux
 - Acesso ao [Oracle MyLearn](https://mylearn.oracle.com)
 
-> **Vozes neurais:** o Chrome usa vozes instaladas no sistema operacional. No Windows, as vozes neurais PT-BR (Antonio, Francisca) já vêm por padrão no Windows 10/11. No macOS/Linux, veja a seção [Vozes](#-vozes) abaixo.
+> **Obs. sobre vozes:** o Chrome usa as vozes instaladas no seu sistema operacional. No Windows 10/11 já vem vozes PT-BR por padrão. Se não sair áudio, veja a seção [Vozes](#-vozes) no final.
 
 ---
 
-## ⚡ Instalação rápida (modo desenvolvedor)
+## ⚡ Instalação (passo a passo)
 
-### Passo 1 — Baixar o repositório
+### Passo 1 — Baixar o projeto
 
+Você tem duas opções:
+
+**Opção A — Via Git (recomendado para quem já tem Git instalado)**
+
+Abra o terminal e rode:
 ```bash
 git clone https://github.com/Victoredbr21/dublador-e-tradutor-cc.git
-cd dublador-e-tradutor-cc
 ```
 
-Ou clique em **Code → Download ZIP** e extraia a pasta.
+**Opção B — Download ZIP (mais fácil para quem não usa Git)**
+
+1. Nesta página do GitHub, clique no botão verde **`<> Code`**
+2. Clique em **`Download ZIP`**
+3. Salve o arquivo em algum lugar fácil de achar (ex: Área de trabalho)
+4. Clique com o botão direito no arquivo ZIP → **Extrair tudo...**
+5. Escolha onde extrair e clique em **Extrair**
+
+Você vai ter uma pasta chamada `dublador-e-tradutor-cc-main` (ou similar).
+
+> ⚠️ **Importante:** não delete essa pasta depois. A extensão precisa dela para funcionar.
 
 ---
 
-### Passo 2 — Abrir o gerenciador de extensões
+### Passo 2 — Abrir as configurações de extensões do Chrome
 
-1. Abra o Chrome
-2. Na barra de endereço, digite:
+1. Abra o **Google Chrome**
+2. Na barra de endereços (onde você digita sites), apague o que estiver escrito
+3. Digite exatamente isso e aperte **Enter**:
    ```
    chrome://extensions
    ```
-3. Pressione **Enter**
+
+Você vai cair nessa tela:
+
+```
+┌──────────────────────────────────────────────────────┐
+│ Extensões                                          │
+│                          Modo do desenvolvedor: [ ] │
+└──────────────────────────────────────────────────────┘
+```
 
 ---
 
-### Passo 3 — Ativar o modo desenvolvedor
+### Passo 3 — Ativar o Modo do Desenvolvedor
 
-No canto superior direito da página de extensões, ative o toggle **"Modo do desenvolvedor"**.
+No **canto superior direito** da tela de extensões, você vai ver **"Modo do desenvolvedor"** com um toggle ao lado.
+
+Clique nesse toggle para ativar. Ele vai ficar azul/verde.
 
 ```
-┌──────────────────────────────────────┐
-│  Extensões       [Modo do desenvolvedor ●] │
-└──────────────────────────────────────┘
+Antes:  Modo do desenvolvedor: [ ]
+ Depois: Modo do desenvolvedor: [✓]
 ```
+
+Depois de ativar, três botões novos vão aparecer no topo da página:
+- **Carregar sem compactação** ← esse é o que vamos usar
+- Compactar extensão
+- Atualizar
 
 ---
 
 ### Passo 4 — Carregar a extensão
 
 1. Clique em **"Carregar sem compactação"**
-2. Navegue até a pasta que você clonou/extraiu
-3. Selecione a pasta **`extension`** (não a raiz do projeto, a subpasta)
-4. Clique em **"Selecionar pasta"**
+2. Uma janela do explorador de arquivos vai abrir
+3. Navegue até a pasta que você baixou/extraiu no Passo 1
+4. **Atenção:** dentro dessa pasta tem uma subpasta chamada **`extension`** — selecione ela, não a pasta de fora
 
-A extensão aparecerá na lista com o nome **Oracle CC Narrator**.
+```
+dublador-e-tradutor-cc/          ← NÃO selecione essa
+└── extension/                   ← Selecione ESSA
+    ├── manifest.json
+    ├── content.js
+    ├── popup.html
+    └── ...
+```
+
+5. Clique em **"Selecionar pasta"**
+
+Se deu certo, a extensão **Oracle CC Narrator** vai aparecer na lista com um card.
 
 ---
 
-### Passo 5 — Fixar na barra do Chrome
+### Passo 5 — Fixar o ícone na barra do Chrome
 
-1. Clique no ícone de peça de quebra-cabeça (🧩) na barra do Chrome
-2. Encontre **Oracle CC Narrator**
-3. Clique no 📌 (fixar) ao lado do nome
+Para não ficar procurando toda hora:
 
-O ícone do microfone aparecerá fixo na barra.
+1. Clique no ícone de peça de quebra-cabeça **🧩** que aparece na barra do Chrome (ao lado da barra de endereço, no canto direito)
+2. Vai aparecer a lista de extensões instaladas
+3. Encontre **Oracle CC Narrator**
+4. Clique no 📌 (alfinete/pin) ao lado do nome
+
+O ícone da extensão vai aparecer fixo na barra — é por ele que você abre o painel.
 
 ---
 
-## 🎧 Como usar
+## 🎧 Como usar (dia a dia)
 
-### 1. Abrir um curso no Oracle MyLearn
+### 1. Abre o curso no Oracle MyLearn
 
-Acesse [mylearn.oracle.com](https://mylearn.oracle.com), entre em qualquer curso com vídeo e inicie uma aula.
+Entre em [mylearn.oracle.com](https://mylearn.oracle.com), escolha um curso com vídeo e abra uma aula.
 
-### 2. Ativar as legendas (CC) no player
+---
 
-O player precisa estar com as legendas **ligadas** para a TextTrack API funcionar. Procure o botão `CC` no canto do player Brightcove e ative.
+### 2. Ligue as legendas (CC) no player
 
-### 3. Ligar o narrador
+Esse passo é obrigatório. A extensão lê as legendas do player — se elas estiverem desligadas, não tem o que ler.
 
-Clique no ícone da extensão na barra e pressione o **botão redondo** (Master Switch).
+Procure o botão **`CC`** na barra de controles do player de vídeo e clique nele para ativar as legendas.
+
+```
+[ ►  ]  [🔉]  [0:23 / 4:15]  [CC]  [⛶]  ← clique aqui
+```
+
+---
+
+### 3. Clique na página antes de dar play
+
+O Chrome bloqueia áudio automático se você não interagiu com a página. Antes de ligar o narrador, **clique em qualquer lugar da página** (não precisa ser no vídeo, pode ser em qualquer texto).
+
+---
+
+### 4. Ligue o narrador
+
+Clique no ícone da extensão na barra do Chrome para abrir o painel, e pressione o **botão redondo** (Master Switch).
 
 ```
 ┌──────────────────────────────┐
-│ 🎤 Oracle CC Narrator    [▶] │  ← vermelho = desligado
-│ 🔴 Desativado               │
+│ 🎤 Oracle CC Narrator  [►] │  ← vermelho = desligado
+│ 🔴 Desativado              │
 └──────────────────────────────┘
 
 ┌──────────────────────────────┐
-│ 🎤 Oracle CC Narrator   [❚❚] │  ← verde = narrador ativo
-│ 🟢 Aguardando legenda...    │
-│                            │
-│ Legenda detectada          │
-│ "In this section we..."    │
-│ Tradução PT-BR              │
-│ "Nesta seção vamos..."     │
+│ 🎤 Oracle CC Narrator [II] │  ← verde = narrador ativo
+│ 🟢 Aguardando legenda...   │
 └──────────────────────────────┘
 ```
 
-> ⚠️ **Importante:** clique em qualquer lugar da página antes de dar play no vídeo. O Chrome bloqueia áudio automático sem interação do usuário (`NotAllowedError`).
+Agora dê play no vídeo. O narrador começa a falar junto com as legendas 🎉
 
 ---
 
-## ⚙️ Configurações
+### 5. Ajustar as configurações (opcional)
 
-| Opção | Descrição | Padrão |
-|-------|-----------|--------|
-| **Voz** | Escolhe entre 13 vozes neurais PT-BR/PT-PT | Francisca |
-| **Idioma da legenda** | Idioma fonte para tradução (ou detectar auto) | Detectar auto |
-| **Velocidade** | Velocidade de narração de 0.5× a 2.0× | 1.1× |
-| **Volume** | Volume do narrador de 0% a 100% | 100% |
+Dentro do painel da extensão você pode configurar:
 
-> 💡 **Dica de velocidade:** fixar o idioma como **"Inglês (en)"** ao invés de "Detectar automático" elimina a detecção por regex e deixa a pipeline mais rápida.
+| Opção | O que faz | Recomendado |
+|--------|-----------|-------------|
+| **Voz** | Qual voz vai narrar | Selecione uma voz PT-BR |
+| **Idioma da legenda** | Idioma do vídeo original | Deixe "Detectar auto" ou fixe em "Inglês" |
+| **Velocidade** | Quão rápido o narrador fala | 1.1× a 1.3× é confortável |
+| **Volume** | Volume do narrador | 100% |
+
+> 💡 **Dica:** se você sabe que o curso é em inglês, fixe o idioma como **"Inglês (en)"**. Fica mais rápido.
 
 ---
 
-## 🔍 Verificando se a extensão detectou o player
+## 🔄 Comportamento de sincronização
 
-Aperte `F12` no curso e filtre o console por `[Oracle CC]`. Você deve ver:
+A partir da v2.0.0, o narrador é guiado pelo `currentTime` do vídeo:
+
+| Situação | O que acontece |
+|-----------|----------------|
+| Vídeo rodando normal | Narrador fala exatamente a legenda que está na tela |
+| Você pausa o vídeo | TTS para imediatamente |
+| Você volta 30 segundos | Narrador recua e reconta a partir daquele ponto |
+| Você avança com seek | Narrador pula direto para a nova posição |
+| Você aumenta a velocidade (1.5×, 2×) | Sincronização continua perfeita |
+
+---
+
+## 🔍 Verificando se a extensão detectou o vídeo
+
+Se quiser confirmar que está tudo funcionando, aperte **F12** na página do curso, vá na aba **Console** e filtre por `[Oracle CC]`.
+
+Você deve ver algo assim:
 
 ```
-[Oracle CC] Content script iniciado.
+[Oracle CC] Content script iniciado (v2.0.0).
 [Oracle CC] videoScanObserver ativo.
-[Oracle CC] MutationObserver DOM ativo.
-[Oracle CC] <video> detectado pelo MutationObserver.
-[Oracle CC] addtrack detectado: "English"
-[Oracle CC] TextTrack anexado: lang="en" label="English"
+[Oracle CC] Video anexado.
+[Oracle CC] TextTrack: lang="en" label="English"
+[Oracle CC] Cache de tradução pré-aquecido para track "English".
+[Oracle CC] Loop rAF iniciado.
 ```
 
-Quando você ligar o toggle:
-```
-[Oracle CC] Narrador ligado — varrendo videos existentes.
-```
-
-Se **nenhuma** dessas linhas aparecer, verifique se a extensão está ativa em `chrome://extensions` e se a URL do curso começa com `mylearn.oracle.com`.
+Se **não aparecer nada** com `[Oracle CC]`, veja a seção de problemas abaixo.
 
 ---
 
 ## 🔊 Vozes
 
 ### Windows 10 / 11
-As vozes **Antonio** e **Francisca** (neurais PT-BR) já estão disponíveis por padrão. Para verificar ou adicionar mais:
 
-1. `Win + I` → **Hora e idioma** → **Fala**
-2. Em "Vozes", clique em **Adicionar vozes**
-3. Pesquise "Português (Brasil)" e instale
+As vozes PT-BR já vem instaladas por padrão na maioria das máquinas. Se não aparecer nenhuma voz em português no seletor da extensão:
+
+1. Abra o menu **Iniciar** e pesquise **"Configurações de fala"**
+2. Vá em **Hora e idioma** → **Fala**
+3. Em **"Vozes"**, clique em **"Adicionar vozes"**
+4. Pesquise **"Português (Brasil)"** e instale
+5. Reinicie o Chrome
 
 ### macOS
-1. **Preferências do Sistema** → **Acessibilidade** → **Conteúdo Falado**
-2. Clique em **Gerenciar Vozes** e adicione vozes PT-BR
 
-### Linux (Chrome)
-Instale o pacote `espeak-ng` com suporte a `pt-BR`:
+1. Abra **Preferências do Sistema** (ou Ajustes do Sistema no macOS 13+)
+2. Vá em **Acessibilidade** → **Conteúdo Falado**
+3. Clique em **Gerenciar Vozes** e adicione vozes PT-BR
+
+### Linux
+
 ```bash
 sudo apt install espeak-ng
 ```
 
 ---
 
-## 🛡️ Privacidade
+## 🐛 Problemas comuns
 
-- **Nenhum dado é enviado para servidores externos**, exceto os textos das legendas para a API pública do Google Translate (`translate.googleapis.com`) — o mesmo endpoint que o Google Tradutor usa no navegador sem autenticação.
-- A extensão **não tem service worker**, não monitora navegação e não acessa dados da conta Oracle.
-- Toda configuração fica salva localmente no `chrome.storage.local`.
+| Sintoma | Causa provável | Solução |
+|---------|---------------|----------|
+| Nenhum áudio sai | Voz PT-BR não instalada no SO | Instalar voz conforme seção [Vozes](#-vozes) |
+| Legenda não detectada | CC do player está desligado | Ativar botão CC no player do vídeo |
+| Console não mostra `[Oracle CC]` | Extensão não carregou na página | Verificar se a extensão está ativa e a URL é `mylearn.oracle.com` |
+| Tradução falhou | Sem internet ou Google Translate bloqueado | Narrador fala o texto original como fallback |
+| Erro `not-allowed` no console | Autoplay bloqueado pelo Chrome | Clicar em qualquer lugar da página antes do play |
+| Extensão atualizada mas não funcionou | Cache do content script antigo | `chrome://extensions` → botão 🔄 na extensão |
+| Narrador fala em inglês | Legenda já é PT ou idioma errado detectado | Fixar idioma como **Inglês (en)** no seletor |
 
 ---
 
-## 🛠️ Arquitetura
+## 🛠️ Arquitetura (para curiosos)
 
 ```
 dublador-e-tradutor-cc/
 └── extension/
     ├── manifest.json     ← Manifest V3, permissões mínimas
-    ├── content.js        ← Intercepta TextTrack API + MutationObserver
+    ├── content.js        ← Loop rAF + TextTrack API + tradução
+    ├── background.js     ← Service worker: executa chrome.tts
     ├── popup.html        ← Interface do popup
     ├── popup.js          ← Gravador de config (zero sendMessage)
     ├── styles.css        ← Dark theme
     └── icons/            ← Ícones 16/48/128px
 ```
 
-### Fluxo de dados
+### Fluxo de dados (v2.0.0)
 
 ```
 [Oracle MyLearn — Brightcove Player]
         │
-        │ bootObservers() — sobe no load, independente do toggle
+        │ bootObservers() — sobe no load
         │
-        ├── videoScanObserver (MutationObserver)
-        │     detecta <video> injetado dinamicamente pelo Brightcove
-        │     └── attachVideo() → attachTrack() → track.mode="hidden"
-        │           escuta cuechange + addtrack
-        │
-        └── domObserver (MutationObserver)
-              fallback: escuta .vjs-text-track-cue no DOM
+        └── videoScanObserver detecta <video> dinâmico
+              └── attachVideo() → attachTrack()
+                    └── warmUpTrackCache() — pré-traduz todos os cues
 
   [Usuário liga o toggle]
         │ isEnabled = true
         ▼
-  [pipeline(text)]
-    1. Filtra texto de UI
-    2. Resolve idioma (fixo ou auto-detect)
-    3. Traduz via Google Translate se não for PT
-    4. Fila FIFO → chrome.tts.speak()
-    5. Grava lastOriginal / lastTranslated no storage
-        │
-        ▼ chrome.storage.onChanged
+  [Loop requestAnimationFrame — ~60fps]
+        │ le video.currentTime
+        │ busca VTTCue cujo startTime <= now < endTime
+        │ se cue mudou → speak()
+        │ se video.paused → chrome.tts.stop()
+        ▼
+  [speak(rawText)]
+        1. resolveLang() — detecta ou usa idioma fixo
+        2. translateToPT() — busca no cache (já aquecido) ou faz fetch
+        3. sendMessage({ type: "SPEAK", text, voice, rate, volume })
+        ▼
+  [background.js — Service Worker]
+        1. resolveVoice() — separa lang e voiceName corretamente
+        2. chrome.tts.speak()
+        3. onEvent("end") → sendMessage({ type: "TTS_DONE" })
+        ▼
   [popup.js]
-    Exibe legenda em tempo real
-    Status: Aguardando / Narrando
+        storage.onChanged → exibe legenda original e tradução em tempo real
 ```
 
 ---
 
-## 🐛 Problemas conhecidos
+## 🛡️ Privacidade
 
-| Sintoma | Causa provável | Solução |
-|---------|---------------|----------|
-| Nenhuma voz sai | Voz PT-BR não instalada no SO | Instalar voz conforme seção [Vozes](#-vozes) |
-| Legenda não detectada | CC do player Brightcove está desligado | Ativar o botão CC no player |
-| Console não mostra `[Oracle CC]` | Extensão não carregou na página | Verificar URL e recarregar a extensão |
-| Tradução falhou | Sem internet ou Google Translate bloqueado | Narrador fala o texto original como fallback |
-| Console mostra `not-allowed` | Autoplay bloqueado | Clicar qualquer lugar na página antes do play |
-| Extensão recarregada mas não funciona | Cache do content script | `chrome://extensions` → botão 🔄 na extensão |
+- Os textos das legendas são enviados **apenas** para `translate.googleapis.com` (o mesmo endpoint do Google Tradutor púблico, sem autenticação)
+- Nenhum dado é enviado para servidores externos além desse
+- A extensão não monitora sua navegação, não acessa sua conta Oracle e não tem analytics
+- Toda configuração fica salva localmente no `chrome.storage.local`
 
 ---
 
-## 📝 TODO (pós-testes)
+## 📝 TODO (próximos passos)
 
-- [ ] Confirmar detecção de TextTrack no Brightcove (OCI Foundations)
-- [ ] Empacotar como `.crx` para instalação sem modo dev
+- [ ] Empacotar como `.crx` para instalação sem modo desenvolvedor
 - [ ] Publicar na Chrome Web Store
+- [ ] Suporte a outros players (Coursera, Udemy)
 
 ---
 
