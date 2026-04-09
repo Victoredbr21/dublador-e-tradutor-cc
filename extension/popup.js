@@ -1,218 +1,164 @@
-// Popup — UI com controle WS, captura de audio e controles de audio ao vivo.
-let wsState = "disconnected";
-let captureActive = false;
+// popup.js — Fernando CC Reader
+// Gerencia a UI do popup: toggle on/off, sliders, select de voz, display de CC.
+// Nao tem service worker: se comunica diretamente com o content script via
+// chrome.tabs.sendMessage e persiste config no chrome.storage.local.
 
-const btnConnect        = document.getElementById("btn-connect");
-const btnDisconnect     = document.getElementById("btn-disconnect");
-const btnCapture        = document.getElementById("btn-capture");
-const btnStopCapture    = document.getElementById("btn-stop-capture");
-const wsStatusEl        = document.getElementById("ws-status");
-const captureStatusEl   = document.getElementById("capture-status");
-const messageEl         = document.getElementById("message");
-const transcriptEl      = document.getElementById("transcript");
-const translationEl     = document.getElementById("translation");
-const selectVoice       = document.getElementById("select-voice");
+(function () {
 
-// Sliders
-const sliderSpeaker     = document.getElementById("slider-speaker");
-const labelSpeaker      = document.getElementById("label-speaker");
-const sliderTtsVol      = document.getElementById("slider-tts-vol");
-const labelTtsVol       = document.getElementById("label-tts-vol");
-const sliderRate        = document.getElementById("slider-rate");
-const labelRate         = document.getElementById("label-rate");
+  // --- Elementos DOM ---
+  const btnToggle      = document.getElementById("btn-toggle");
+  const statusBar      = document.getElementById("status-bar");
+  const statusText     = document.getElementById("status-text");
+  const statusDot      = document.getElementById("status-dot");
+  const ccOriginal     = document.getElementById("cc-original");
+  const ccTranslated   = document.getElementById("cc-translated");
+  const labelTranslated = document.getElementById("label-translated");
+  const selectVoice    = document.getElementById("select-voice");
+  const sliderRate     = document.getElementById("slider-rate");
+  const labelRate      = document.getElementById("label-rate");
+  const sliderVolume   = document.getElementById("slider-volume");
+  const labelVolume    = document.getElementById("label-volume");
+  const chkTranslate   = document.getElementById("chk-translate");
 
-// --- Carrega configuracoes salvas ---
-chrome.storage.local.get(["ttsVoice", "speakerGain", "ttsVolume", "ttsRate"], (result) => {
-  if (result.ttsVoice) selectVoice.value = result.ttsVoice;
+  // --- Estado local ---
+  let isEnabled = false;
 
-  if (result.speakerGain !== undefined) {
-    const pct = Math.round(result.speakerGain * 100);
-    sliderSpeaker.value = pct;
-    labelSpeaker.textContent = pct + "%";
+  // --- Utilitarios ---
+  function setStatus(state) {
+    statusBar.className = "status-bar " + state;
+    const labels = {
+      active:    "▶ Narrando",
+      listening: "👂 Aguardando legenda...",
+      idle:      "Desativado",
+    };
+    statusText.textContent = labels[state] || "Desativado";
   }
-  if (result.ttsVolume !== undefined) {
-    const pct = Math.round(result.ttsVolume * 100);
-    sliderTtsVol.value = pct;
-    labelTtsVol.textContent = pct + "%";
+
+  function setToggleUI(enabled) {
+    btnToggle.classList.toggle("on",  enabled);
+    btnToggle.classList.toggle("off", !enabled);
+    btnToggle.setAttribute("aria-label", enabled ? "Desativar narrador" : "Ativar narrador");
+    setStatus(enabled ? "listening" : "idle");
   }
-  if (result.ttsRate !== undefined) {
-    const num = parseInt(result.ttsRate);
-    sliderRate.value = num;
-    labelRate.textContent = (num >= 0 ? "+" : "") + num + "%";
+
+  async function getActiveTab() {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    return tabs[0] ?? null;
   }
-});
 
-// --- Voz TTS ---
-selectVoice.addEventListener("change", () => {
-  const voice = selectVoice.value;
-  chrome.storage.local.set({ ttsVoice: voice });
-  chrome.runtime.sendMessage({ action: "set-config", voice }, (response) => {
-    if (response?.success) setMessage(`🔊 Voz: ${selectVoice.options[selectVoice.selectedIndex].text}`);
+  async function sendToContent(message) {
+    const tab = await getActiveTab();
+    if (!tab) return;
+    chrome.tabs.sendMessage(tab.id, message).catch(() => {});
+  }
+
+  // --- Carrega config salva ---
+  chrome.storage.local.get(
+    ["enabled", "ttsVoice", "ttsRate", "ttsVolume", "translateEN", "lastOriginal", "lastTranslated"],
+    (r) => {
+      isEnabled = r.enabled ?? false;
+      setToggleUI(isEnabled);
+
+      if (r.ttsVoice) {
+        // Tenta selecionar a voz salva; se nao existir no select, mantem o primeiro
+        const opt = selectVoice.querySelector(`option[value="${r.ttsVoice}"]`);
+        if (opt) selectVoice.value = r.ttsVoice;
+      }
+
+      if (r.ttsRate !== undefined) {
+        sliderRate.value   = r.ttsRate;
+        labelRate.textContent = Number(r.ttsRate).toFixed(2) + "\u00d7";
+      }
+
+      if (r.ttsVolume !== undefined) {
+        sliderVolume.value = r.ttsVolume;
+        labelVolume.textContent = Math.round(r.ttsVolume * 100) + "%";
+      }
+
+      chkTranslate.checked = r.translateEN !== false; // default true
+
+      // Restaura ultima legenda exibida (UX: popup reabre e mostra o ultimo CC)
+      if (r.lastOriginal) {
+        ccOriginal.textContent = r.lastOriginal;
+        if (r.lastTranslated && r.lastTranslated !== r.lastOriginal) {
+          ccTranslated.textContent   = r.lastTranslated;
+          ccTranslated.style.display = "block";
+          labelTranslated.style.display = "block";
+        }
+      }
+    }
+  );
+
+  // --- Toggle principal (on/off) ---
+  btnToggle.addEventListener("click", () => {
+    isEnabled = !isEnabled;
+    chrome.storage.local.set({ enabled: isEnabled });
+    setToggleUI(isEnabled);
+    sendToContent({ action: isEnabled ? "enable" : "disable" });
   });
-});
 
-// --- Slider: volume do video (speaker only — Whisper NAO e afetado) ---
-sliderSpeaker.addEventListener("input", () => {
-  const pct = parseInt(sliderSpeaker.value);
-  const gain = pct / 100;
-  labelSpeaker.textContent = pct + "%";
-  chrome.storage.local.set({ speakerGain: gain });
-  chrome.runtime.sendMessage({ action: "set-config", speakerGain: gain });
-});
-
-// --- Slider: volume do narrador TTS ---
-sliderTtsVol.addEventListener("input", () => {
-  const pct = parseInt(sliderTtsVol.value);
-  const vol = pct / 100;
-  labelTtsVol.textContent = pct + "%";
-  chrome.storage.local.set({ ttsVolume: vol });
-  chrome.runtime.sendMessage({ action: "set-config", ttsVolume: vol });
-});
-
-// --- Slider: velocidade do narrador ---
-sliderRate.addEventListener("input", () => {
-  const num = parseInt(sliderRate.value);
-  const rateStr = (num >= 0 ? "+" : "") + num + "%";
-  labelRate.textContent = rateStr;
-  chrome.storage.local.set({ ttsRate: rateStr });
-  chrome.runtime.sendMessage({ action: "set-config", ttsRate: rateStr }, (response) => {
-    if (response?.success) setMessage(`⏩ Velocidade: ${rateStr}`);
+  // --- Voz ---
+  selectVoice.addEventListener("change", () => {
+    const voice = selectVoice.value;
+    chrome.storage.local.set({ ttsVoice: voice });
+    sendToContent({ action: "set-config", ttsVoice: voice });
   });
-});
 
-// --- WebSocket ---
-btnConnect.addEventListener("click", () => {
-  setMessage("");
-  chrome.runtime.sendMessage({ action: "start" }, (response) => {
-    if (response?.success) setMessage(response.message);
+  // --- Velocidade ---
+  sliderRate.addEventListener("input", () => {
+    const rate = parseFloat(sliderRate.value);
+    labelRate.textContent = rate.toFixed(2) + "\u00d7";
+    chrome.storage.local.set({ ttsRate: rate });
+    sendToContent({ action: "set-config", ttsRate: rate });
   });
-});
 
-btnDisconnect.addEventListener("click", () => {
-  setMessage("");
-  chrome.runtime.sendMessage({ action: "stop" }, (response) => {
-    if (response?.success) setMessage(response.message);
+  // --- Volume ---
+  sliderVolume.addEventListener("input", () => {
+    const vol = parseFloat(sliderVolume.value);
+    labelVolume.textContent = Math.round(vol * 100) + "%";
+    chrome.storage.local.set({ ttsVolume: vol });
+    sendToContent({ action: "set-config", ttsVolume: vol });
   });
-});
 
-// --- Capture ---
-btnCapture.addEventListener("click", () => {
-  setMessage("");
-  setCaptureState("capturing");
-  chrome.runtime.sendMessage({ action: "start-capture" }, (response) => {
-    if (response?.success) {
-      captureActive = true;
-      setCaptureState("active");
-      setMessage(response.message);
-    } else {
-      setCaptureState("idle");
-      setMessage(response?.message || "Erro ao capturar.");
+  // --- Checkbox tradutor ---
+  chkTranslate.addEventListener("change", () => {
+    const val = chkTranslate.checked;
+    chrome.storage.local.set({ translateEN: val });
+    sendToContent({ action: "set-config", translateEN: val });
+  });
+
+  // --- Recebe atualizacoes do content script (legenda detectada) ---
+  // O content script nao tem acesso ao popup diretamente, mas podemos
+  // puxar o ultimo CC do storage quando o popup e aberto (ja feito acima).
+  // Para atualizacoes em tempo real enquanto o popup esta aberto,
+  // ouvimos mudancas no storage.local.
+  chrome.storage.onChanged.addListener((changes) => {
+    if (changes.lastOriginal) {
+      const orig = changes.lastOriginal.newValue;
+      ccOriginal.textContent = orig || "\u2014";
+      setStatus("active");
+      // Volta para listening apos 2s sem nova legenda
+      clearTimeout(window._ccIdleTimer);
+      window._ccIdleTimer = setTimeout(() => {
+        if (isEnabled) setStatus("listening");
+      }, 2000);
+    }
+    if (changes.lastTranslated) {
+      const trans = changes.lastTranslated.newValue;
+      const orig  = document.getElementById("cc-original").textContent;
+      if (trans && trans !== orig) {
+        ccTranslated.textContent      = trans;
+        ccTranslated.style.display    = "block";
+        labelTranslated.style.display = "block";
+      } else {
+        ccTranslated.style.display    = "none";
+        labelTranslated.style.display = "none";
+      }
+    }
+    if (changes.enabled) {
+      isEnabled = changes.enabled.newValue;
+      setToggleUI(isEnabled);
     }
   });
-});
 
-btnStopCapture.addEventListener("click", () => {
-  setMessage("");
-  chrome.runtime.sendMessage({ action: "stop-capture" }, (response) => {
-    if (response?.success) {
-      captureActive = false;
-      setCaptureState("idle");
-      setMessage(response.message);
-    } else {
-      setMessage(response?.message || "Erro ao parar captura.");
-    }
-  });
-});
-
-// --- Mensagens do SW ---
-chrome.runtime.onMessage.addListener((message) => {
-  if (message.type === "ws-state") {
-    wsState = message.state;
-    updateWsUI();
-  }
-  if (message.type === "server-response") {
-    const d = message.data;
-    if (d.type === "pong")        setMessage("Pong recebido!");
-    if (d.type === "chunk_ok")    { setMessage("Chunk enviado ✅"); setTimeout(() => { if (messageEl.textContent.includes("✅")) setMessage(""); }, 1500); }
-    if (d.type === "tts.playing") setMessage("🔊 Falando: " + d.text);
-    if (d.type === "tts.done")    setMessage("✔️ TTS conclуído.");
-    if (d.type === "tts.error")   setMessage("❌ Erro TTS: " + d.error);
-  }
-  if (message.type === "capture-lost") {
-    captureActive = false;
-    setCaptureState("idle");
-    setMessage("⚠️ " + message.message);
-  }
-  if (message.type === "stt-result") {
-    if (message.sttType === "transcript.partial")  updateTranscript(message.text, false);
-    else if (message.sttType === "transcript.final") updateTranscript(message.text, true);
-  }
-  if (message.type === "stt-error") setMessage("STT error: " + message.text);
-  if (message.type === "translation" && message.data) {
-    const d = message.data;
-    if (d.type === "translation.final")        updateTranslation(`${d.source} \u2192 ${d.target}`, true);
-    else if (d.type === "translation.partial") updateTranslation(`[Parcial] ${d.target}`);
-    else if (d.type === "translation.error")   updateTranslation("Erro ao traduzir: " + d.original);
-  }
-});
-
-// --- Estado visual ---
-function updateWsUI() {
-  btnConnect.disabled    = wsState !== "disconnected";
-  btnDisconnect.disabled = wsState !== "connected";
-  btnCapture.disabled    = wsState !== "connected" || captureActive;
-  wsStatusEl.className   = "ws-status " + wsState;
-  switch (wsState) {
-    case "connected":  wsStatusEl.textContent = "🟢 Conectado"; break;
-    case "connecting": wsStatusEl.textContent = "🟡 Conectando..."; break;
-    default:           wsStatusEl.textContent = "🔴 Desconectado";
-  }
-}
-
-function setCaptureState(state) {
-  captureStatusEl.className = "capture-status " + state;
-  switch (state) {
-    case "capturing":
-      captureStatusEl.textContent = "Captura: Iniciando...";
-      btnCapture.disabled = true;
-      btnStopCapture.disabled = false;
-      break;
-    case "active":
-      captureStatusEl.textContent = "Captura: Enviando chunks...";
-      btnCapture.disabled = true;
-      btnStopCapture.disabled = false;
-      break;
-    default:
-      captureStatusEl.textContent = "Captura: Parada";
-      btnCapture.disabled = wsState !== "connected";
-      btnStopCapture.disabled = true;
-  }
-}
-
-function setMessage(text) {
-  messageEl.textContent = text;
-  if (text) setTimeout(() => { if (messageEl.textContent === text) messageEl.textContent = ""; }, 4000);
-}
-
-function updateTranscript(text, isFinal) {
-  if (!transcriptEl) return;
-  if (isFinal) transcriptEl.textContent += (transcriptEl.textContent ? " " : "") + text;
-  else transcriptEl.textContent = text;
-}
-
-function updateTranslation(text, isFinal) {
-  if (!translationEl) return;
-  if (isFinal) translationEl.textContent += (translationEl.textContent ? "\n" : "") + text;
-  else translationEl.textContent = text;
-  translationEl.scrollTop = translationEl.scrollHeight;
-}
-
-// Estado inicial
-chrome.runtime.sendMessage({ action: "status" }, (res) => {
-  if (res) {
-    wsState = res.wsState;
-    captureActive = res.capturePort;
-    updateWsUI();
-    setCaptureState(res.capturePort ? "active" : "idle");
-  }
-});
+})();

@@ -3,82 +3,96 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dublador de Vídeos</title>
+  <title>Fernando CC Reader</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="popup">
-    <h1>Dublador de Vídeos</h1>
-    <p id="ws-status" class="ws-status disconnected">🔴 Desconectado</p>
 
-    <div class="buttons">
-      <button id="btn-connect" class="btn btn-connect">Conectar</button>
-      <button id="btn-disconnect" class="btn btn-disconnect" disabled>Desconectar</button>
+    <!-- Header -->
+    <div class="header">
+      <div class="logo">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="Fernando CC Reader">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8"  y1="23" x2="16" y2="23"/>
+        </svg>
+      </div>
+      <span class="app-title">Fernando CC Reader</span>
+      <button id="btn-toggle" class="toggle-btn off" aria-label="Ativar narrador" title="Ativar / Desativar">
+        <span class="toggle-track">
+          <span class="toggle-thumb"></span>
+        </span>
+      </button>
     </div>
 
-    <p id="capture-status" class="capture-status idle">Captura: Parada</p>
-    <div class="buttons">
-      <button id="btn-capture" class="btn btn-capture" disabled>🎤 Capturar</button>
-      <button id="btn-stop-capture" class="btn btn-stop-capture" disabled>⏹ Parar</button>
+    <!-- Status bar -->
+    <div id="status-bar" class="status-bar idle">
+      <span id="status-dot" class="status-dot"></span>
+      <span id="status-text">Desativado</span>
     </div>
 
-    <div class="voice-config">
-      <label for="select-voice">🔊 Voz TTS</label>
+    <!-- Legenda atual sendo narrada -->
+    <div class="cc-display">
+      <div class="cc-label">Legenda detectada</div>
+      <div id="cc-original" class="cc-text original" title="Texto original">—</div>
+      <div class="cc-label" id="label-translated" style="display:none">Tradução PT-BR</div>
+      <div id="cc-translated" class="cc-text translated" style="display:none">—</div>
+    </div>
+
+    <!-- Config: Voz -->
+    <div class="section">
+      <label class="section-label" for="select-voice">🔊 Voz</label>
       <select id="select-voice">
-        <optgroup label="PT-BR (Português Brasil)">
+        <optgroup label="PT-BR — Português Brasil">
           <option value="pt-BR-AntonioNeural">Antonio (masculino)</option>
           <option value="pt-BR-FranciscaNeural">Francisca (feminino)</option>
           <option value="pt-BR-ThalitaNeural">Thalita (feminino)</option>
-          <option value="pt-BR-ThalitaMultilingualNeural">Thalita Multilingual (feminino)</option>
           <option value="pt-BR-DonatoNeural">Donato (masculino)</option>
-          <option value="pt-BR-ElzaNeural">Elza (feminino)</option>
           <option value="pt-BR-FabioNeural">Fabio (masculino)</option>
           <option value="pt-BR-GiovannaNeural">Giovanna (feminino)</option>
           <option value="pt-BR-HumbertoNeural">Humberto (masculino)</option>
           <option value="pt-BR-JulioNeural">Julio (masculino)</option>
-          <option value="pt-BR-LeilaNeural">Leila (feminino)</option>
-          <option value="pt-BR-LeticiaNeural">Leticia (feminino)</option>
-          <option value="pt-BR-ManuelaNeural">Manuela (feminino)</option>
           <option value="pt-BR-NicolauNeural">Nicolau (masculino)</option>
           <option value="pt-BR-ValerioNeural">Valerio (masculino)</option>
           <option value="pt-BR-YaraNeural">Yara (feminino)</option>
         </optgroup>
-        <optgroup label="PT-PT (Português Portugal)">
+        <optgroup label="PT-PT — Português Portugal">
           <option value="pt-PT-DuarteNeural">Duarte (masculino)</option>
           <option value="pt-PT-FernandaNeural">Fernanda (feminino)</option>
-          <option value="pt-PT-RaquelNeural">Raquel (feminino)</option>
         </optgroup>
       </select>
     </div>
 
-    <!-- Controles de Audio -->
-    <div class="audio-controls">
-      <div class="slider-row">
-        <label for="slider-speaker">📢 Volume do Vídeo</label>
-        <div class="slider-wrap">
-          <input type="range" id="slider-speaker" min="0" max="100" value="80" step="5">
-          <span id="label-speaker" class="slider-val">80%</span>
-        </div>
-      </div>
-      <div class="slider-row">
-        <label for="slider-tts-vol">🔊 Volume do Narrador</label>
-        <div class="slider-wrap">
-          <input type="range" id="slider-tts-vol" min="0" max="150" value="100" step="5">
-          <span id="label-tts-vol" class="slider-val">100%</span>
-        </div>
-      </div>
-      <div class="slider-row">
-        <label for="slider-rate">⏩ Velocidade do Narrador</label>
-        <div class="slider-wrap">
-          <input type="range" id="slider-rate" min="-50" max="100" value="20" step="5">
-          <span id="label-rate" class="slider-val">+20%</span>
-        </div>
+    <!-- Config: Velocidade -->
+    <div class="section">
+      <label class="section-label" for="slider-rate">⏩ Velocidade</label>
+      <div class="slider-wrap">
+        <input type="range" id="slider-rate" min="0.5" max="2.0" value="1.1" step="0.05">
+        <span id="label-rate" class="slider-val">1.1×</span>
       </div>
     </div>
 
-    <p id="transcript" class="transcript" title="Transcricao original (EN)"></p>
-    <p id="translation" class="translation" title="Traducao (PT-BR)"></p>
-    <p id="message" class="message"></p>
+    <!-- Config: Volume -->
+    <div class="section">
+      <label class="section-label" for="slider-volume">🔉 Volume do narrador</label>
+      <div class="slider-wrap">
+        <input type="range" id="slider-volume" min="0" max="1" value="1.0" step="0.05">
+        <span id="label-volume" class="slider-val">100%</span>
+      </div>
+    </div>
+
+    <!-- Config: Traduzir EN -->
+    <div class="section row">
+      <span class="section-label">🌐 Traduzir legendas em inglês</span>
+      <label class="mini-toggle" for="chk-translate" aria-label="Traduzir inglês para PT-BR">
+        <input type="checkbox" id="chk-translate" checked>
+        <span class="mini-track"><span class="mini-thumb"></span></span>
+      </label>
+    </div>
+
+    <div class="footer">v1.0.0 · Oracle MyLearn</div>
   </div>
   <script src="popup.js"></script>
 </body>

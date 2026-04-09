@@ -1,5 +1,6 @@
-/* Popup — estilos basicos, funcionais, sem frescura. */
-* {
+/* Fernando CC Reader — popup styles */
+
+*, *::before, *::after {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
@@ -7,116 +8,188 @@
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  min-width: 320px;
-  background: #1a1a2e;
-  color: #eee;
+  font-size: 13px;
+  min-width: 300px;
+  background: #0f1117;
+  color: #d4d4d8;
+  -webkit-font-smoothing: antialiased;
 }
 
 .popup {
-  padding: 14px;
+  padding: 14px 16px 12px;
   display: flex;
   flex-direction: column;
+  gap: 10px;
+}
+
+/* ---- Header ---- */
+.header {
+  display: flex;
   align-items: center;
   gap: 8px;
 }
 
-h1 {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.ws-status,
-.capture-status {
-  font-size: 12px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-weight: 500;
-}
-
-.ws-status.connected    { background: #1b5e20; color: #a5d6a7; }
-.ws-status.connecting   { background: #e65100; color: #ffe0b2; }
-.ws-status.disconnected { background: #b71c1c; color: #ef9a9a; }
-
-.capture-status.active    { background: #1b5e20; color: #a5d6a7; }
-.capture-status.capturing { background: #e65100; color: #ffe0b2; }
-.capture-status.idle      { background: #444;    color: #ccc; }
-
-.buttons {
+.logo {
+  color: #4f98a3;
   display: flex;
-  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
 }
 
-.btn {
-  padding: 7px 14px;
+.app-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f4f4f5;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Toggle principal ---- */
+.toggle-btn {
+  background: none;
   border: none;
-  border-radius: 4px;
-  font-size: 12px;
   cursor: pointer;
+  padding: 2px;
+  flex-shrink: 0;
+  border-radius: 99px;
+  transition: box-shadow 180ms ease;
+}
+
+.toggle-btn:focus-visible {
+  outline: 2px solid #4f98a3;
+  outline-offset: 2px;
+}
+
+.toggle-track {
+  display: flex;
+  align-items: center;
+  width: 38px;
+  height: 22px;
+  border-radius: 99px;
+  background: #3f3f46;
+  padding: 2px;
+  transition: background 200ms ease;
+  position: relative;
+}
+
+.toggle-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #71717a;
+  transition: transform 200ms ease, background 200ms ease;
+  position: absolute;
+  left: 2px;
+}
+
+.toggle-btn.on .toggle-track  { background: #4f98a3; }
+.toggle-btn.on .toggle-thumb  { background: #fff; transform: translateX(16px); }
+
+/* ---- Status bar ---- */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
   font-weight: 500;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: #1c1c22;
+  color: #71717a;
+  transition: background 200ms, color 200ms;
 }
 
-.btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3f3f46;
+  flex-shrink: 0;
+  transition: background 200ms;
 }
 
-.btn-connect      { background: #2e7d32; color: #fff; }
-.btn-connect:hover:not(:disabled)      { background: #388e3c; }
+.status-bar.listening .status-dot { background: #d19900; animation: pulse 1.4s ease-in-out infinite; }
+.status-bar.listening { color: #d4d4d8; }
 
-.btn-disconnect   { background: #c62828; color: #fff; }
-.btn-disconnect:hover:not(:disabled)   { background: #d32f2f; }
+.status-bar.active .status-dot { background: #4f98a3; }
+.status-bar.active { color: #4f98a3; }
 
-.btn-capture      { background: #0277bd; color: #fff; }
-.btn-capture:hover:not(:disabled)      { background: #0288d1; }
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
 
-.btn-stop-capture { background: #6a1b9a; color: #fff; }
-.btn-stop-capture:hover:not(:disabled) { background: #7b1fa2; }
-
-/* --- Seletor de voz --- */
-.voice-config {
-  width: 100%;
+/* ---- Display de CC ---- */
+.cc-display {
+  background: #16161e;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  padding: 9px 11px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-height: 54px;
 }
 
-.voice-config label {
-  font-size: 11px;
-  color: #aaa;
+.cc-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: #52525b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-.voice-config select {
-  width: 100%;
-  background: #0d1b2a;
-  color: #eee;
-  border: 1px solid #333;
-  border-radius: 4px;
-  padding: 5px 6px;
+.cc-text {
   font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+  max-height: 60px;
+  overflow-y: auto;
 }
 
-/* --- Controles de audio (sliders) --- */
-.audio-controls {
-  width: 100%;
+.cc-text.original   { color: #a1a1aa; }
+.cc-text.translated { color: #6daa45; }
+
+/* ---- Secoes de config ---- */
+.section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  background: #0d1b2a;
-  border-radius: 6px;
-  padding: 10px;
+  gap: 5px;
 }
 
-.slider-row {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+.section.row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
 }
 
-.slider-row label {
+.section-label {
   font-size: 11px;
-  color: #aaa;
+  font-weight: 500;
+  color: #71717a;
 }
 
+/* ---- Select de voz ---- */
+select {
+  width: 100%;
+  background: #18181b;
+  color: #d4d4d8;
+  border: 1px solid #27272a;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 180ms;
+}
+
+select:focus {
+  outline: none;
+  border-color: #4f98a3;
+}
+
+/* ---- Sliders ---- */
 .slider-wrap {
   display: flex;
   align-items: center;
@@ -125,47 +198,64 @@ h1 {
 
 .slider-wrap input[type="range"] {
   flex: 1;
-  height: 4px;
-  accent-color: #0288d1;
+  height: 3px;
+  accent-color: #4f98a3;
   cursor: pointer;
+  border-radius: 99px;
 }
 
 .slider-val {
   font-size: 11px;
-  color: #90caf9;
-  min-width: 38px;
+  color: #4f98a3;
+  min-width: 36px;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-/* --- Transcripts --- */
-.transcript {
-  font-size: 11px;
-  color: #90caf9;
-  background: #0d1b2a;
-  padding: 6px 8px;
-  border-radius: 4px;
-  width: 100%;
-  max-height: 50px;
-  overflow-y: auto;
-  word-break: break-word;
+/* ---- Mini toggle (checkbox tradutor) ---- */
+.mini-toggle {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
-.translation {
-  font-size: 12px;
-  color: #a5d6a7;
-  background: #0d1b2a;
-  padding: 6px 8px;
-  border-radius: 4px;
-  width: 100%;
-  max-height: 80px;
-  overflow-y: auto;
-  word-break: break-word;
+.mini-toggle input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
 }
 
-.message {
-  font-size: 11px;
-  color: #aaa;
-  min-height: 14px;
+.mini-track {
+  display: flex;
+  align-items: center;
+  width: 30px;
+  height: 17px;
+  border-radius: 99px;
+  background: #3f3f46;
+  padding: 2px;
+  transition: background 200ms;
+  position: relative;
+}
+
+.mini-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #71717a;
+  position: absolute;
+  left: 2px;
+  transition: transform 200ms, background 200ms;
+}
+
+.mini-toggle input:checked + .mini-track { background: #4f98a3; }
+.mini-toggle input:checked + .mini-track .mini-thumb { background: #fff; transform: translateX(13px); }
+
+/* ---- Footer ---- */
+.footer {
+  font-size: 10px;
+  color: #3f3f46;
   text-align: center;
+  padding-top: 2px;
 }
