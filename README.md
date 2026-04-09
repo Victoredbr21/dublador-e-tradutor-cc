@@ -1,4 +1,4 @@
-# 🎤 Fernando CC Reader
+# 🎤 Oracle CC Narrator
 
 > Extensão para Google Chrome que lê em voz alta as legendas dos cursos **Oracle MyLearn** — tradução automática para PT-BR inclusa.
 
@@ -61,9 +61,9 @@ Ou clique em **Code → Download ZIP** e extraia a pasta.
 No canto superior direito da página de extensões, ative o toggle **"Modo do desenvolvedor"**.
 
 ```
-┌───────────────────────────────────────┐
+┌──────────────────────────────────────┐
 │  Extensões       [Modo do desenvolvedor ●] │
-└───────────────────────────────────────┘
+└──────────────────────────────────────┘
 ```
 
 ---
@@ -75,14 +75,14 @@ No canto superior direito da página de extensões, ative o toggle **"Modo do de
 3. Selecione a pasta **`extension`** (não a raiz do projeto, a subpasta)
 4. Clique em **"Selecionar pasta"**
 
-A extensão aparecerá na lista com o nome **Fernando CC Reader**.
+A extensão aparecerá na lista com o nome **Oracle CC Narrator**.
 
 ---
 
 ### Passo 5 — Fixar na barra do Chrome
 
 1. Clique no ícone de peça de quebra-cabeça (🧩) na barra do Chrome
-2. Encontre **Fernando CC Reader**
+2. Encontre **Oracle CC Narrator**
 3. Clique no 📌 (fixar) ao lado do nome
 
 O ícone do microfone aparecerá fixo na barra.
@@ -105,20 +105,20 @@ Clique no ícone da extensão na barra e pressione o **botão redondo verde** (M
 
 ```
 ┌──────────────────────────────┐
-│ 🎤 Fernando CC Reader    [▶] │  ← botão vermelho = desligado
+│ 🎤 Oracle CC Narrator    [▶] │  ← botão vermelho = desligado
 │ 🔴 Desativado               │
-│                            │
-│ Clique o botão acima ↑    │
+│                              │
+│ Clique o botão acima ↑       │
 └──────────────────────────────┘
 
 ┌──────────────────────────────┐
-│ 🎤 Fernando CC Reader   [❘❘] │  ← botão verde = narrador ativo
-│ 🟢 Aguardando legenda...    │
-│                            │
-│ Legenda detectada          │
-│ "In this section we..."    │
-│ Tradução PT-BR              │
-│ "Nesta seção vamos..."     │
+│ 🎤 Oracle CC Narrator   [❚❚] │  ← botão verde = narrador ativo
+│ 🟢 Aguardando legenda...     │
+│                              │
+│ Legenda detectada            │
+│ "In this section we..."      │
+│ Tradução PT-BR               │
+│ "Nesta seção vamos..."       │
 └──────────────────────────────┘
 ```
 
@@ -176,7 +176,7 @@ dublador-e-tradutor-cc/
     ├── popup.html        ← Interface do popup
     ├── popup.js          ← Gravador de config (zero sendMessage)
     ├── styles.css        ← Dark theme
-    └── icons/            ← Ícones 16/32/48/128px
+    └── icons/            ← Ícones 16/48/128px
 ```
 
 ### Fluxo de dados
