@@ -6,6 +6,10 @@
 // POP-4: ZERO sendMessage — popup e gravador de config; content.js reage via storage.onChanged
 // EX-1:  sendToContent removido por completo
 // EX-4:  safeSet() com catch de cota
+//
+// v1.3.0 fix:
+//   - Bug #1: selectVoice agora e populado dinamicamente via speechSynthesis.getVoices()
+//             + evento voiceschanged — exibe as vozes reais do browser (filtradas pt/en)
 
 (function () {
 
@@ -42,6 +46,47 @@
       }
     });
   }
+
+  // =========================================================================
+  // FIX Bug #1 — Vozes dinamicas via speechSynthesis
+  //
+  // getVoices() e assincrono no Chrome/Brave: as vozes chegam so apos o
+  // evento voiceschanged. Populamos o <select> nesse momento, priorizando
+  // vozes pt-* e en-* (fallback: exibe todas se nenhuma for encontrada).
+  // =========================================================================
+  function populateVoices(savedVoice) {
+    const voices = speechSynthesis.getVoices();
+    if (!voices.length) return; // ainda nao carregou — voiceschanged vai chamar de novo
+
+    const preferred = voices.filter(v => v.lang.startsWith("pt") || v.lang.startsWith("en"));
+    const list = preferred.length ? preferred : voices;
+
+    selectVoice.innerHTML = "";
+    list.forEach(v => {
+      const opt = document.createElement("option");
+      opt.value = v.name;
+      opt.textContent = `${v.name} (${v.lang})`;
+      if (v.name === savedVoice) opt.selected = true;
+      selectVoice.appendChild(opt);
+    });
+
+    // Se nenhuma voz bateu com o salvo, forca o valor para restaurar
+    if (savedVoice && !selectVoice.value) {
+      // voz salva nao esta disponivel — seleciona a primeira pt-BR se existir
+      const ptBR = list.find(v => v.lang === "pt-BR");
+      if (ptBR) selectVoice.value = ptBR.name;
+    }
+  }
+
+  // Evento assincrono do browser (Chrome/Brave carregam vozes async)
+  speechSynthesis.addEventListener("voiceschanged", () => {
+    chrome.storage.local.get(["ttsVoice"], r => {
+      populateVoices(r.ttsVoice ?? "");
+    });
+  });
+
+  // Tentativa sincrona (Firefox e alguns contextos carregam na hora)
+  populateVoices("");
 
   // =========================================================================
   // UI helpers
@@ -82,11 +127,9 @@
       isEnabled = r.readerActive ?? false;
       setToggleUI(isEnabled);
 
-      // Voz salva
-      if (r.ttsVoice) {
-        const opt = selectVoice.querySelector(`option[value="${CSS.escape(r.ttsVoice)}"]`);
-        if (opt) selectVoice.value = r.ttsVoice;
-      }
+      // FIX Bug #1: popula vozes com o valor salvo
+      // (populateVoices ja foi chamada sem savedVoice; chama de novo com o salvo)
+      if (r.ttsVoice) populateVoices(r.ttsVoice);
 
       // Idioma fonte salvo
       if (r.sourceLang) {
@@ -132,7 +175,7 @@
   // O content.js ouve via storage.onChanged e reage
   // =========================================================================
 
-  // Voz: change (nao tem label para atualizar ao vivo)
+  // Voz: change — salva o nome da voz selecionada
   selectVoice.addEventListener("change", () => {
     safeSet({ ttsVoice: selectVoice.value });
   });

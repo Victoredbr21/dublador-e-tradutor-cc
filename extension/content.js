@@ -6,12 +6,17 @@
 //   3. pipeline() traduz e envia { type: "SPEAK" } para o service worker
 //      (chrome.tts nao funciona em content scripts no Brave — fix v1.2.0)
 //   4. Service worker executa chrome.tts e devolve TTS_DONE para drenar a fila
+//
+// v1.3.0 fixes:
+//   - Bug #2: rawSeenCache barra duplicatas ANTES da traducao (Fonte 1 + Fonte 2)
+//   - Bug #3: attachVideo separa guard addtrack do re-scan de textTracks
+//             para tolerar tracks recriadas pelo Brightcove
 
 (function () {
   if (window.__oracleCCLoaded) return;
   window.__oracleCCLoaded = true;
 
-  console.log("[Oracle CC] Content script iniciado (v1.2.0).");
+  console.log("[Oracle CC] Content script iniciado (v1.3.0).");
 
   // =========================================================================
   // ESTADO
@@ -25,6 +30,10 @@
   const speakQueue  = [];
   let   isSpeaking  = false;
   const spokenCache = new Set();
+
+  // FIX Bug #2 — cache de texto RAW (antes de traduzir) para barrar duplicatas
+  // entre Fonte 1 (TextTrack cuechange) e Fonte 2 (MutationObserver DOM)
+  const rawSeenCache = new Set();
 
   // =========================================================================
   // safeSet — wrapper storage com tratamento de cota
@@ -79,7 +88,15 @@
         console.log("[Oracle CC] Narrador desligado.");
       } else {
         console.log("[Oracle CC] Narrador ligado — varrendo videos existentes.");
-        document.querySelectorAll("video").forEach(attachVideo);
+        // FIX Bug #3 — limpa caches ao religar para evitar textos congelados
+        speakQueue.length = 0;
+        isSpeaking = false;
+        spokenCache.clear();
+        rawSeenCache.clear();
+        // Re-varre textTracks de cada video (Brightcove pode ter recriado tracks)
+        document.querySelectorAll("video").forEach(video => {
+          for (const track of video.textTracks) attachTrack(track);
+        });
         safeSet({ readerStatus: "waiting" });
       }
     }
@@ -206,19 +223,25 @@
   // =========================================================================
   async function pipeline(text, sourceEl) {
     if (!isEnabled) return;
-    if (!text || text.trim().length < 2) return;
-    if (sourceEl && isUIElement(sourceEl)) return;
-    if (isUIText(text)) return;
+    const raw = text?.trim();
+    if (!raw || raw.length < 2) return;
 
-    const original = text.trim();
-    const lang     = resolveLang(original);
-    let   final    = original;
+    // FIX Bug #2 — barrar duplicatas pelo texto RAW antes de qualquer trabalho
+    if (rawSeenCache.has(raw)) return;
+    rawSeenCache.add(raw);
+    setTimeout(() => rawSeenCache.delete(raw), 8000);
+
+    if (sourceEl && isUIElement(sourceEl)) return;
+    if (isUIText(raw)) return;
+
+    const lang  = resolveLang(raw);
+    let   final = raw;
 
     if (lang !== "pt") {
-      final = await translateToPT(original, lang);
-      scheduleStorageWrite(original, final);
+      final = await translateToPT(raw, lang);
+      scheduleStorageWrite(raw, final);
     } else {
-      scheduleStorageWrite(original, original);
+      scheduleStorageWrite(raw, raw);
     }
 
     enqueue(final);
@@ -228,7 +251,7 @@
   // FONTE 1 — TextTrack API (Brightcove/VJS)
   // =========================================================================
   const observedTracks = new WeakSet();
-  const observedVideos = new WeakSet();
+  const observedVideos = new WeakSet(); // guarda somente o listener addtrack
 
   function attachTrack(track) {
     if (!track || observedTracks.has(track)) return;
@@ -250,10 +273,15 @@
     console.log(`[Oracle CC] TextTrack: lang="${track.language ?? "?"}" label="${track.label ?? ""}"`);
   }
 
+  // FIX Bug #3 — re-scan de textTracks ocorre SEMPRE (Brightcove pode recriar
+  // o objeto track); o listener addtrack e registrado apenas uma vez por video
   function attachVideo(video) {
-    if (!video || observedVideos.has(video)) return;
-    observedVideos.add(video);
+    if (!video) return;
+    // Sempre re-varre as tracks existentes (captura tracks recriadas pelo Brightcove)
     for (const track of video.textTracks) attachTrack(track);
+    // Guard: listener addtrack so uma vez por elemento <video>
+    if (observedVideos.has(video)) return;
+    observedVideos.add(video);
     video.textTracks.addEventListener("addtrack", (e) => {
       console.log(`[Oracle CC] addtrack: "${e?.track?.label ?? "?"}"`);
       attachTrack(e?.track);
