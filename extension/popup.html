@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dublador de Vídeos</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="popup">
+    <h1>Dublador de Vídeos</h1>
+    <p id="ws-status" class="ws-status disconnected">🔴 Desconectado</p>
+
+    <div class="buttons">
+      <button id="btn-connect" class="btn btn-connect">Conectar</button>
+      <button id="btn-disconnect" class="btn btn-disconnect" disabled>Desconectar</button>
+    </div>
+
+    <p id="capture-status" class="capture-status idle">Captura: Parada</p>
+    <div class="buttons">
+      <button id="btn-capture" class="btn btn-capture" disabled>🎤 Capturar</button>
+      <button id="btn-stop-capture" class="btn btn-stop-capture" disabled>⏹ Parar</button>
+    </div>
+
+    <div class="voice-config">
+      <label for="select-voice">🔊 Voz TTS</label>
+      <select id="select-voice">
+        <optgroup label="PT-BR (Português Brasil)">
+          <option value="pt-BR-AntonioNeural">Antonio (masculino)</option>
+          <option value="pt-BR-FranciscaNeural">Francisca (feminino)</option>
+          <option value="pt-BR-ThalitaNeural">Thalita (feminino)</option>
+          <option value="pt-BR-ThalitaMultilingualNeural">Thalita Multilingual (feminino)</option>
+          <option value="pt-BR-DonatoNeural">Donato (masculino)</option>
+          <option value="pt-BR-ElzaNeural">Elza (feminino)</option>
+          <option value="pt-BR-FabioNeural">Fabio (masculino)</option>
+          <option value="pt-BR-GiovannaNeural">Giovanna (feminino)</option>
+          <option value="pt-BR-HumbertoNeural">Humberto (masculino)</option>
+          <option value="pt-BR-JulioNeural">Julio (masculino)</option>
+          <option value="pt-BR-LeilaNeural">Leila (feminino)</option>
+          <option value="pt-BR-LeticiaNeural">Leticia (feminino)</option>
+          <option value="pt-BR-ManuelaNeural">Manuela (feminino)</option>
+          <option value="pt-BR-NicolauNeural">Nicolau (masculino)</option>
+          <option value="pt-BR-ValerioNeural">Valerio (masculino)</option>
+          <option value="pt-BR-YaraNeural">Yara (feminino)</option>
+        </optgroup>
+        <optgroup label="PT-PT (Português Portugal)">
+          <option value="pt-PT-DuarteNeural">Duarte (masculino)</option>
+          <option value="pt-PT-FernandaNeural">Fernanda (feminino)</option>
+          <option value="pt-PT-RaquelNeural">Raquel (feminino)</option>
+        </optgroup>
+      </select>
+    </div>
+
+    <!-- Controles de Audio -->
+    <div class="audio-controls">
+      <div class="slider-row">
+        <label for="slider-speaker">📢 Volume do Vídeo</label>
+        <div class="slider-wrap">
+          <input type="range" id="slider-speaker" min="0" max="100" value="80" step="5">
+          <span id="label-speaker" class="slider-val">80%</span>
+        </div>
+      </div>
+      <div class="slider-row">
+        <label for="slider-tts-vol">🔊 Volume do Narrador</label>
+        <div class="slider-wrap">
+          <input type="range" id="slider-tts-vol" min="0" max="150" value="100" step="5">
+          <span id="label-tts-vol" class="slider-val">100%</span>
+        </div>
+      </div>
+      <div class="slider-row">
+        <label for="slider-rate">⏩ Velocidade do Narrador</label>
+        <div class="slider-wrap">
+          <input type="range" id="slider-rate" min="-50" max="100" value="20" step="5">
+          <span id="label-rate" class="slider-val">+20%</span>
+        </div>
+      </div>
+    </div>
+
+    <p id="transcript" class="transcript" title="Transcricao original (EN)"></p>
+    <p id="translation" class="translation" title="Traducao (PT-BR)"></p>
+    <p id="message" class="message"></p>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

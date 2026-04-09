@@ -1,0 +1,171 @@
+/* Popup — estilos basicos, funcionais, sem frescura. */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  min-width: 320px;
+  background: #1a1a2e;
+  color: #eee;
+}
+
+.popup {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+h1 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ws-status,
+.capture-status {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.ws-status.connected    { background: #1b5e20; color: #a5d6a7; }
+.ws-status.connecting   { background: #e65100; color: #ffe0b2; }
+.ws-status.disconnected { background: #b71c1c; color: #ef9a9a; }
+
+.capture-status.active    { background: #1b5e20; color: #a5d6a7; }
+.capture-status.capturing { background: #e65100; color: #ffe0b2; }
+.capture-status.idle      { background: #444;    color: #ccc; }
+
+.buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  padding: 7px 14px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-connect      { background: #2e7d32; color: #fff; }
+.btn-connect:hover:not(:disabled)      { background: #388e3c; }
+
+.btn-disconnect   { background: #c62828; color: #fff; }
+.btn-disconnect:hover:not(:disabled)   { background: #d32f2f; }
+
+.btn-capture      { background: #0277bd; color: #fff; }
+.btn-capture:hover:not(:disabled)      { background: #0288d1; }
+
+.btn-stop-capture { background: #6a1b9a; color: #fff; }
+.btn-stop-capture:hover:not(:disabled) { background: #7b1fa2; }
+
+/* --- Seletor de voz --- */
+.voice-config {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.voice-config label {
+  font-size: 11px;
+  color: #aaa;
+}
+
+.voice-config select {
+  width: 100%;
+  background: #0d1b2a;
+  color: #eee;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 5px 6px;
+  font-size: 12px;
+}
+
+/* --- Controles de audio (sliders) --- */
+.audio-controls {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #0d1b2a;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.slider-row label {
+  font-size: 11px;
+  color: #aaa;
+}
+
+.slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.slider-wrap input[type="range"] {
+  flex: 1;
+  height: 4px;
+  accent-color: #0288d1;
+  cursor: pointer;
+}
+
+.slider-val {
+  font-size: 11px;
+  color: #90caf9;
+  min-width: 38px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Transcripts --- */
+.transcript {
+  font-size: 11px;
+  color: #90caf9;
+  background: #0d1b2a;
+  padding: 6px 8px;
+  border-radius: 4px;
+  width: 100%;
+  max-height: 50px;
+  overflow-y: auto;
+  word-break: break-word;
+}
+
+.translation {
+  font-size: 12px;
+  color: #a5d6a7;
+  background: #0d1b2a;
+  padding: 6px 8px;
+  border-radius: 4px;
+  width: 100%;
+  max-height: 80px;
+  overflow-y: auto;
+  word-break: break-word;
+}
+
+.message {
+  font-size: 11px;
+  color: #aaa;
+  min-height: 14px;
+  text-align: center;
+}
