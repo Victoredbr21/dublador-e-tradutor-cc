@@ -1,9 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Oracle CC Narrator",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Lê as legendas (CC/VTT) de vídeos da Oracle MyLearn em voz alta em PT-BR, sem servidor, sem captura de áudio.",
   "minimum_chrome_version": "116",
+
+  "background": {
+    "service_worker": "background.js"
+  },
 
   "action": {
     "default_popup": "popup.html",

@@ -1,29 +1,23 @@
 // content.js — Oracle CC Narrator
 //
-// Fluxo principal:
-//   1. Observers iniciam IMEDIATAMENTE no load (independente de readerActive)
-//      — captura o <video> do Brightcove mesmo se injetado depois da pagina carregar
-//   2. Pipeline so narra quando isEnabled === true
-//   3. sourceLang fixo pula deteccao de idioma (mais rapido)
-//   4. Fila FIFO com chrome.tts
-//
-// EX-1: sem sendMessage vulneravel
-// EX-2: handleTTSError() com codigos oficiais
-// EX-3: Guards e optional chaining no MutationObserver
-// EX-4: safeSet() com catch de cota
-// FIX-TIMING: videoScanObserver + domObserver sobem no load, nao dependem de readerActive
+// Fluxo:
+//   1. bootObservers() sobe no load — independente de readerActive
+//   2. TextTrack API (Brightcove/VJS) + MutationObserver como fallback
+//   3. pipeline() traduz e envia { type: "SPEAK" } para o service worker
+//      (chrome.tts nao funciona em content scripts no Brave — fix v1.2.0)
+//   4. Service worker executa chrome.tts e devolve TTS_DONE para drenar a fila
 
 (function () {
   if (window.__oracleCCLoaded) return;
   window.__oracleCCLoaded = true;
 
-  console.log("[Oracle CC] Content script iniciado.");
+  console.log("[Oracle CC] Content script iniciado (v1.2.0).");
 
   // =========================================================================
   // ESTADO
   // =========================================================================
   let isEnabled  = false;
-  let ttsVoice   = "pt-BR-FranciscaNeural";
+  let ttsVoice   = "pt-BR";
   let ttsRate    = 1.1;
   let ttsVolume  = 1.0;
   let sourceLang = "auto";
@@ -33,16 +27,16 @@
   const spokenCache = new Set();
 
   // =========================================================================
-  // EX-4: safeSet — wrapper storage com tratamento de cota
+  // safeSet — wrapper storage com tratamento de cota
   // =========================================================================
   function safeSet(data) {
     chrome.storage.local.set(data, () => {
       if (!chrome.runtime.lastError) return;
       const msg = chrome.runtime.lastError.message ?? "";
       if (msg.includes("QUOTA_BYTES") || msg.toLowerCase().includes("quota")) {
-        console.warn("[Oracle CC] Storage: cota estourada. Chaves:", Object.keys(data).join(", "));
+        console.warn("[Oracle CC] Storage: cota estourada.", Object.keys(data).join(", "));
       } else {
-        console.error("[Oracle CC] Storage: erro —", msg);
+        console.error("[Oracle CC] Storage erro:", msg);
       }
     });
   }
@@ -54,7 +48,7 @@
   }
 
   // =========================================================================
-  // CARREGA CONFIG — depois inicia observers (independente do estado)
+  // CARREGA CONFIG — depois inicia observers
   // =========================================================================
   chrome.storage.local.get(
     ["readerActive", "ttsVoice", "ttsRate", "ttsVolume", "sourceLang"],
@@ -69,24 +63,21 @@
         if (r.sourceLang   !== undefined) sourceLang = r.sourceLang;
         console.log(`[Oracle CC] Config — enabled:${isEnabled} voz:${ttsVoice} rate:${ttsRate} lang:${sourceLang}`);
       }
-      // FIX-TIMING: observers sobem SEMPRE, mesmo com isEnabled=false
-      // O pipeline internamente checa isEnabled antes de narrar
       bootObservers();
     }
   );
 
-  // POP-4: reage a mudancas do popup (zero sendMessage)
+  // Reage a mudancas do popup
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.readerActive) {
       isEnabled = changes.readerActive.newValue;
       if (!isEnabled) {
         speakQueue.length = 0;
         isSpeaking = false;
-        chrome.tts.stop();
+        chrome.runtime.sendMessage({ type: "STOP" }).catch(() => {});
         safeSet({ readerStatus: "off" });
         console.log("[Oracle CC] Narrador desligado.");
       } else {
-        // Reativou: varre videos existentes que podem ter sido injetados enquanto estava off
         console.log("[Oracle CC] Narrador ligado — varrendo videos existentes.");
         document.querySelectorAll("video").forEach(attachVideo);
         safeSet({ readerStatus: "waiting" });
@@ -98,8 +89,17 @@
     if (changes.sourceLang) sourceLang = changes.sourceLang.newValue;
   });
 
+  // Recebe TTS_DONE do service worker para drenar a fila
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.type === "TTS_DONE") {
+      isSpeaking = false;
+      if (speakQueue.length === 0) safeSet({ readerStatus: "waiting" });
+      drainQueue();
+    }
+  });
+
   // =========================================================================
-  // SECAO 1 — FILTRO DE TEXTO DE UI
+  // FILTRO DE UI
   // =========================================================================
   const BLOCKED_TAGS = new Set([
     "BUTTON", "A", "NAV", "HEADER", "FOOTER", "SELECT", "OPTION",
@@ -131,7 +131,7 @@
   }
 
   // =========================================================================
-  // SECAO 2 — DETECCAO DE IDIOMA
+  // DETECCAO DE IDIOMA
   // =========================================================================
   const PT_MARKERS = /\b(que|de|para|com|uma|um|em|ao|na|no|as|os|se|por|mais|mas|isto|isso|este|esta|como|quando|onde|porque|voce|ele|ela|eles|elas|nos|meu|minha|seu|sua|esse|aqui|ali|la|ja|tambem|ainda|muito|pouco|sempre|nunca|agora|depois|antes|durante|entre|sobre|cada|todo|toda|todos|todas|qualquer)\b/i;
   const EN_MARKERS = /\b(the|is|are|was|were|will|would|could|should|have|has|had|this|that|these|those|with|from|into|onto|upon|about|above|below|between|through|during|before|after|where|when|which|while|because|although|however|therefore|furthermore|nevertheless|meanwhile|otherwise|instead|unless|until|whether|both|either|neither|each|every|another|other|such|same|different|often|always|never|already|just|still|even|only|also|too|very|quite|rather|really|actually|basically|generally|usually|typically|specifically|particularly|especially|certainly|definitely|probably|possibly|perhaps|maybe)\b/i;
@@ -149,7 +149,7 @@
   }
 
   // =========================================================================
-  // SECAO 3 — TRADUCAO
+  // TRADUCAO
   // =========================================================================
   const translateCache = new Map();
 
@@ -170,31 +170,8 @@
   }
 
   // =========================================================================
-  // SECAO 4 — FILA TTS
+  // FILA TTS — envia para service worker via sendMessage
   // =========================================================================
-  const TTS_ERRORS = {
-    "network":               "Erro de rede ao sintetizar voz.",
-    "not-allowed":           "Autoplay bloqueado — usuario nao interagiu com a pagina.",
-    "voice-unavailable":     "Voz selecionada nao disponivel.",
-    "language-unavailable":  "Idioma da voz nao disponivel.",
-    "invalid-argument":      "Argumento invalido passado ao TTS.",
-    "interrupted":           "Narrador interrompido.",
-    "audio-busy":            "Audio ocupado por outro processo.",
-    "synthesis-failed":      "Falha interna na sintese de voz.",
-    "synthesis-unavailable": "Motor de sintese nao disponivel.",
-  };
-
-  function handleTTSError(msg) {
-    const code = (msg ?? "").toLowerCase().trim();
-    const desc = TTS_ERRORS[code];
-    const expected = ["interrupted", "not-allowed", "voice-unavailable"].includes(code);
-    if (desc) {
-      expected ? console.warn(`[Oracle CC] TTS — ${desc}`) : console.error(`[Oracle CC] TTS — ${desc} (${code})`);
-    } else {
-      console.error(`[Oracle CC] TTS — erro desconhecido: "${msg}"`);
-    }
-  }
-
   function enqueue(text) {
     const clean = text.replace(/\s+/g, " ").trim();
     if (!clean || spokenCache.has(clean)) return;
@@ -209,26 +186,26 @@
     isSpeaking = true;
     const text = speakQueue.shift();
     safeSet({ readerStatus: "speaking" });
-    chrome.tts.speak(text, {
-      lang:    ttsVoice,
-      rate:    ttsRate,
-      volume:  ttsVolume,
-      onEvent: (ev) => {
-        if (ev.type === "end" || ev.type === "error" || ev.type === "cancelled") {
-          isSpeaking = false;
-          if (ev.type === "error") handleTTSError(ev.errorMessage);
-          if (speakQueue.length === 0) safeSet({ readerStatus: "waiting" });
-          drainQueue();
-        }
-      }
+    chrome.runtime.sendMessage({
+      type:   "SPEAK",
+      text,
+      voice:  ttsVoice,
+      rate:   ttsRate,
+      volume: ttsVolume,
+    }).catch((err) => {
+      // Service worker pode estar dormindo — tenta acordar e re-enqueue
+      console.warn("[Oracle CC] sendMessage falhou, re-enfileirando:", err.message);
+      isSpeaking = false;
+      speakQueue.unshift(text);
+      setTimeout(drainQueue, 500);
     });
   }
 
   // =========================================================================
-  // SECAO 5 — PIPELINE PRINCIPAL
+  // PIPELINE PRINCIPAL
   // =========================================================================
   async function pipeline(text, sourceEl) {
-    if (!isEnabled) return;                          // guard: so narra se ligado
+    if (!isEnabled) return;
     if (!text || text.trim().length < 2) return;
     if (sourceEl && isUIElement(sourceEl)) return;
     if (isUIText(text)) return;
@@ -248,7 +225,7 @@
   }
 
   // =========================================================================
-  // SECAO 6 — FONTE 1: TextTrack API (VTT nativo via Video.js / Brightcove)
+  // FONTE 1 — TextTrack API (Brightcove/VJS)
   // =========================================================================
   const observedTracks = new WeakSet();
   const observedVideos = new WeakSet();
@@ -256,9 +233,9 @@
   function attachTrack(track) {
     if (!track || observedTracks.has(track)) return;
     observedTracks.add(track);
-    track.mode = "hidden"; // hidden = ativo mas invisivel (nao sobrepoe as legendas visuais)
+    track.mode = "hidden";
     track.addEventListener("cuechange", () => {
-      if (!isEnabled) return; // guard rapido antes de qualquer I/O
+      if (!isEnabled) return;
       const cues = track.activeCues;
       if (!cues || cues.length === 0) return;
       for (const cue of cues) {
@@ -270,27 +247,25 @@
         pipeline(text, null);
       }
     });
-    console.log(`[Oracle CC] TextTrack anexado: lang="${track.language ?? "?"}" label="${track.label ?? ""}"`);
+    console.log(`[Oracle CC] TextTrack: lang="${track.language ?? "?"}" label="${track.label ?? ""}"`);
   }
 
   function attachVideo(video) {
     if (!video || observedVideos.has(video)) return;
     observedVideos.add(video);
-    // tracks ja existentes
     for (const track of video.textTracks) attachTrack(track);
-    // tracks adicionados dinamicamente pelo Brightcove depois do load
     video.textTracks.addEventListener("addtrack", (e) => {
-      console.log(`[Oracle CC] addtrack detectado: "${e?.track?.label ?? "?"}"`);
+      console.log(`[Oracle CC] addtrack: "${e?.track?.label ?? "?"}"`);
       attachTrack(e?.track);
     });
-    console.log(`[Oracle CC] Video anexado (src=${video.src?.slice(0, 40) ?? "blob"})`);
+    console.log(`[Oracle CC] Video anexado.`);
   }
 
   // =========================================================================
-  // SECAO 7 — FONTE 2: MutationObserver DOM (fallback para .vjs-text-track-cue)
+  // FONTE 2 — MutationObserver DOM (.vjs-text-track-cue fallback)
   // =========================================================================
   const CC_SELECTORS = [
-    ".vjs-text-track-cue",           // Brightcove / Video.js — seletor primario
+    ".vjs-text-track-cue",
     ".vjs-text-track-display",
     "[class*='caption']", "[class*='subtitle']", "[class*='transcript']",
     "[class*='cc-']", "[class*='-cc']",
@@ -311,7 +286,6 @@
     if (domObserver) return;
     domObserver = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
-        // Nos adicionados (cue novo apareceu no DOM)
         for (const node of mutation.addedNodes) {
           if (!node || node.nodeType !== Node.ELEMENT_NODE) continue;
           if (isUIElement(node)) continue;
@@ -319,7 +293,6 @@
           if (!text || text === lastDomText) continue;
           if (matchesCC(node)) { lastDomText = text; pipeline(text, node); }
         }
-        // characterData (texto do cue foi atualizado in-place)
         if (mutation.type === "characterData") {
           const el = mutation.target?.parentElement;
           if (!el || isUIElement(el)) continue;
@@ -335,37 +308,20 @@
   }
 
   // =========================================================================
-  // SECAO 8 — BOOT: observers sobem IMEDIATAMENTE, independente de readerActive
-  //
-  // Razao: o Brightcove injeta o <video> dinamicamente depois do load.
-  // Se esperarmos o usuario ligar a extensao para comecar a observar,
-  // o evento addtrack ja passou e o TextTrack nunca e capturado.
-  //
-  // Solucao: observers sempre ativos. Pipeline tem guard isEnabled no topo.
+  // BOOT — observers sobem SEMPRE no load
   // =========================================================================
   let videoScanObserver = null;
 
   function bootObservers() {
-    // 1. Varre videos que ja existem na pagina
-    document.querySelectorAll("video").forEach(v => {
-      console.log(`[Oracle CC] Video encontrado no boot: ${v.src?.slice(0,40) ?? "blob"}`);
-      attachVideo(v);
-    });
+    document.querySelectorAll("video").forEach(attachVideo);
 
-    // 2. Observa videos injetados dinamicamente (Brightcove injeta depois)
     if (!videoScanObserver) {
       videoScanObserver = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
           for (const node of mutation.addedNodes) {
             if (!node || node.nodeType !== Node.ELEMENT_NODE) continue;
-            if (node.tagName === "VIDEO") {
-              console.log("[Oracle CC] <video> detectado pelo MutationObserver.");
-              attachVideo(node);
-            }
-            node.querySelectorAll?.("video").forEach(v => {
-              console.log("[Oracle CC] <video> encontrado dentro de node inserido.");
-              attachVideo(v);
-            });
+            if (node.tagName === "VIDEO") attachVideo(node);
+            node.querySelectorAll?.("video").forEach(attachVideo);
           }
         }
       });
@@ -373,10 +329,8 @@
       console.log("[Oracle CC] videoScanObserver ativo.");
     }
 
-    // 3. MutationObserver DOM para fallback via .vjs-text-track-cue
     startDOMObserver();
 
-    // 4. Se ja estava ligado ao recarregar a pagina, atualiza status
     if (isEnabled) safeSet({ readerStatus: "waiting" });
   }
 
