@@ -8,7 +8,7 @@
 
 ## 📌 O que faz
 
-O Oracle MyLearn usa um player SCORM (Articulate Storyline) com legendas no formato **WebVTT**. A extensão intercepta essas legendas diretamente pela **TextTrack API** do navegador, traduz os textos em inglês via Google Translate (sem chave de API) e narra tudo em português usando o motor de voz nativo do Chrome (`chrome.tts`).
+O Oracle MyLearn usa o player **Brightcove (Video.js)** com legendas no formato **WebVTT**. A extensão intercepta essas legendas diretamente pela **TextTrack API** do navegador, traduz os textos em inglês via Google Translate (sem chave de API) e narra tudo em português usando o motor de voz nativo do Chrome (`chrome.tts`).
 
 ### Funcionalidades
 
@@ -24,7 +24,7 @@ O Oracle MyLearn usa um player SCORM (Articulate Storyline) com legendas no form
 
 ## 🖥️ Requisitos
 
-- Google Chrome **versão 109 ou superior** (Manifest V3)
+- Google Chrome **versão 116 ou superior** (Manifest V3)
 - Windows, macOS ou Linux com vozes de síntese de voz instaladas
 - Acesso ao [Oracle MyLearn](https://mylearn.oracle.com)
 
@@ -97,30 +97,30 @@ Acesse [mylearn.oracle.com](https://mylearn.oracle.com), entre em qualquer curso
 
 ### 2. Ativar as legendas (CC) no player
 
-O player precisa estar com as legendas **ligadas** para a TextTrack API funcionar. Procure o botão `CC` no canto do player e ative.
+O player precisa estar com as legendas **ligadas** para a TextTrack API funcionar. Procure o botão `CC` no canto do player Brightcove e ative.
 
 ### 3. Ligar o narrador
 
-Clique no ícone da extensão na barra e pressione o **botão redondo verde** (Master Switch).
+Clique no ícone da extensão na barra e pressione o **botão redondo** (Master Switch).
 
 ```
 ┌──────────────────────────────┐
-│ 🎤 Oracle CC Narrator    [▶] │  ← botão vermelho = desligado
+│ 🎤 Oracle CC Narrator    [▶] │  ← vermelho = desligado
 │ 🔴 Desativado               │
-│                              │
-│ Clique o botão acima ↑       │
 └──────────────────────────────┘
 
 ┌──────────────────────────────┐
-│ 🎤 Oracle CC Narrator   [❚❚] │  ← botão verde = narrador ativo
-│ 🟢 Aguardando legenda...     │
-│                              │
-│ Legenda detectada            │
-│ "In this section we..."      │
-│ Tradução PT-BR               │
-│ "Nesta seção vamos..."       │
+│ 🎤 Oracle CC Narrator   [❚❚] │  ← verde = narrador ativo
+│ 🟢 Aguardando legenda...    │
+│                            │
+│ Legenda detectada          │
+│ "In this section we..."    │
+│ Tradução PT-BR              │
+│ "Nesta seção vamos..."     │
 └──────────────────────────────┘
 ```
+
+> ⚠️ **Importante:** clique em qualquer lugar da página antes de dar play no vídeo. O Chrome bloqueia áudio automático sem interação do usuário (`NotAllowedError`).
 
 ---
 
@@ -133,7 +133,29 @@ Clique no ícone da extensão na barra e pressione o **botão redondo verde** (M
 | **Velocidade** | Velocidade de narração de 0.5× a 2.0× | 1.1× |
 | **Volume** | Volume do narrador de 0% a 100% | 100% |
 
-> 💡 **Dica de velocidade:** fixar o idioma como "Inglês (en)" ao invés de "Detectar automático" elimina a detecção por regex e deixa a pipeline mais rápida.
+> 💡 **Dica de velocidade:** fixar o idioma como **"Inglês (en)"** ao invés de "Detectar automático" elimina a detecção por regex e deixa a pipeline mais rápida.
+
+---
+
+## 🔍 Verificando se a extensão detectou o player
+
+Aperte `F12` no curso e filtre o console por `[Oracle CC]`. Você deve ver:
+
+```
+[Oracle CC] Content script iniciado.
+[Oracle CC] videoScanObserver ativo.
+[Oracle CC] MutationObserver DOM ativo.
+[Oracle CC] <video> detectado pelo MutationObserver.
+[Oracle CC] addtrack detectado: "English"
+[Oracle CC] TextTrack anexado: lang="en" label="English"
+```
+
+Quando você ligar o toggle:
+```
+[Oracle CC] Narrador ligado — varrendo videos existentes.
+```
+
+Se **nenhuma** dessas linhas aparecer, verifique se a extensão está ativa em `chrome://extensions` e se a URL do curso começa com `mylearn.oracle.com`.
 
 ---
 
@@ -182,13 +204,25 @@ dublador-e-tradutor-cc/
 ### Fluxo de dados
 
 ```
-[Oracle MyLearn Player]
-        │ TextTrack cuechange / MutationObserver
+[Oracle MyLearn — Brightcove Player]
+        │
+        │ bootObservers() — sobe no load, independente do toggle
+        │
+        ├── videoScanObserver (MutationObserver)
+        │     detecta <video> injetado dinamicamente pelo Brightcove
+        │     └── attachVideo() → attachTrack() → track.mode="hidden"
+        │           escuta cuechange + addtrack
+        │
+        └── domObserver (MutationObserver)
+              fallback: escuta .vjs-text-track-cue no DOM
+
+  [Usuário liga o toggle]
+        │ isEnabled = true
         ▼
-  [content.js]
+  [pipeline(text)]
     1. Filtra texto de UI
-    2. Detecta idioma (ou usa seletor fixo)
-    3. Traduz via Google Translate (se EN)
+    2. Resolve idioma (fixo ou auto-detect)
+    3. Traduz via Google Translate se não for PT
     4. Fila FIFO → chrome.tts.speak()
     5. Grava lastOriginal / lastTranslated no storage
         │
@@ -205,16 +239,17 @@ dublador-e-tradutor-cc/
 | Sintoma | Causa provável | Solução |
 |---------|---------------|----------|
 | Nenhuma voz sai | Voz PT-BR não instalada no SO | Instalar voz conforme seção [Vozes](#-vozes) |
-| Legenda não detectada | CC do player Oracle está desligado | Ativar o botão CC no player |
+| Legenda não detectada | CC do player Brightcove está desligado | Ativar o botão CC no player |
+| Console não mostra `[Oracle CC]` | Extensão não carregou na página | Verificar URL e recarregar a extensão |
 | Tradução falhou | Sem internet ou Google Translate bloqueado | Narrador fala o texto original como fallback |
-| Console mostra `not-allowed` | Autoplay bloqueado — usuário ainda não interagiu | Clicar qualquer lugar na página |
+| Console mostra `not-allowed` | Autoplay bloqueado | Clicar qualquer lugar na página antes do play |
+| Extensão recarregada mas não funciona | Cache do content script | `chrome://extensions` → botão 🔄 na extensão |
 
 ---
 
 ## 📝 TODO (pós-testes)
 
-- [ ] Testar no Oracle MyLearn com cursos OCI Foundations
-- [ ] Verificar detecção de TextTrack dentro do iframe Storyline
+- [ ] Confirmar detecção de TextTrack no Brightcove (OCI Foundations)
 - [ ] Empacotar como `.crx` para instalação sem modo dev
 - [ ] Publicar na Chrome Web Store
 
