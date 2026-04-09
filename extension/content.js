@@ -7,26 +7,17 @@
 //      (chrome.tts nao funciona em content scripts no Brave — fix v1.2.0)
 //   4. Service worker executa chrome.tts e devolve TTS_DONE para drenar a fila
 //
-// v1.3.0 fixes:
-//   - Bug #2: rawSeenCache barra duplicatas ANTES da traducao (Fonte 1 + Fonte 2)
-//   - Bug #3: attachVideo separa guard addtrack do re-scan de textTracks
-//             para tolerar tracks recriadas pelo Brightcove
-//
-// v1.4.0 fix:
-//   - Bug #4: cuechange valida video.currentTime contra janela do cue
-//             [startTime-0.3s, endTime+0.3s] antes de chamar pipeline()
-//
-// v1.5.0 fix:
-//   - Bug #5: Brightcove re-dispara cuechange para o mesmo cue durante
-//             reproducao normal (re-render do player). TTL de 8s no
-//             rawSeenCache expirava antes do cue terminar, causando loop.
-//             Fix: rawSeenCache TTL 8000->30000ms, spokenCache TTL 10000->30000ms.
+// v1.3.0 — rawSeenCache barra duplicatas antes da traducao
+// v1.4.0 — cuechange valida video.currentTime contra janela do cue
+// v1.5.0 — TTL rawSeenCache/spokenCache 30s (anti-loop Brightcove)
+// v1.6.0 — Fix A: speakQueue maxSize=1 (narrador sempre no presente)
+//           Fix B: hasActiveTextTrack — Fonte 2 silenciada quando Fonte 1 ativa
 
 (function () {
   if (window.__oracleCCLoaded) return;
   window.__oracleCCLoaded = true;
 
-  console.log("[Oracle CC] Content script iniciado (v1.5.0).");
+  console.log("[Oracle CC] Content script iniciado (v1.6.0).");
 
   // =========================================================================
   // ESTADO
@@ -40,13 +31,15 @@
   const speakQueue  = [];
   let   isSpeaking  = false;
   const spokenCache = new Set();
-
-  // FIX Bug #2 — cache de texto RAW (antes de traduzir) para barrar duplicatas
-  // entre Fonte 1 (TextTrack cuechange) e Fonte 2 (MutationObserver DOM)
   const rawSeenCache = new Set();
 
+  // FIX B (v1.6.0) — flag: Fonte 1 (TextTrack) esta ativa e disparando cues.
+  // Quando true, Fonte 2 (MutationObserver) ignora tudo para evitar duplicatas
+  // fragmentadas que causam loop e narrador atrasado em relacao a legenda.
+  let hasActiveTextTrack = false;
+
   // =========================================================================
-  // safeSet — wrapper storage com tratamento de cota
+  // safeSet
   // =========================================================================
   function safeSet(data) {
     chrome.storage.local.set(data, () => {
@@ -67,7 +60,7 @@
   }
 
   // =========================================================================
-  // CARREGA CONFIG — depois inicia observers
+  // CARREGA CONFIG
   // =========================================================================
   chrome.storage.local.get(
     ["readerActive", "ttsVoice", "ttsRate", "ttsVolume", "sourceLang"],
@@ -98,12 +91,10 @@
         console.log("[Oracle CC] Narrador desligado.");
       } else {
         console.log("[Oracle CC] Narrador ligado — varrendo videos existentes.");
-        // FIX Bug #3 — limpa caches ao religar para evitar textos congelados
         speakQueue.length = 0;
         isSpeaking = false;
         spokenCache.clear();
         rawSeenCache.clear();
-        // Re-varre textTracks de cada video (Brightcove pode ter recriado tracks)
         document.querySelectorAll("video").forEach(video => {
           for (const track of video.textTracks) attachTrack(track, video);
         });
@@ -116,7 +107,6 @@
     if (changes.sourceLang) sourceLang = changes.sourceLang.newValue;
   });
 
-  // Recebe TTS_DONE do service worker para drenar a fila
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === "TTS_DONE") {
       isSpeaking = false;
@@ -197,15 +187,26 @@
   }
 
   // =========================================================================
-  // FILA TTS — envia para service worker via sendMessage
+  // FILA TTS
   // =========================================================================
+
+  // FIX A (v1.6.0) — maxQueueSize=1: se ja tem 1 item esperando na fila,
+  // descarta o mais velho e coloca o novo. Narrador sempre no presente
+  // da legenda, nunca acumula frases de cues passados.
+  const MAX_QUEUE_SIZE = 1;
+
   function enqueue(text) {
     const clean = text.replace(/\s+/g, " ").trim();
     if (!clean || spokenCache.has(clean)) return;
     spokenCache.add(clean);
-    // FIX Bug #5 — TTL aumentado de 10s para 30s para cobrir cues longos
-    // e evitar que o Brightcove re-dispare o mesmo cue apos expiracao
     setTimeout(() => spokenCache.delete(clean), 30000);
+
+    // FIX A — descarta entradas antigas se fila ja atingiu o limite
+    while (speakQueue.length >= MAX_QUEUE_SIZE) {
+      const dropped = speakQueue.shift();
+      console.log("[Oracle CC] Fila cheia — descartando cue antigo:", dropped?.slice(0, 40));
+    }
+
     speakQueue.push(clean);
     drainQueue();
   }
@@ -222,7 +223,6 @@
       rate:   ttsRate,
       volume: ttsVolume,
     }).catch((err) => {
-      // Service worker pode estar dormindo — tenta acordar e re-enqueue
       console.warn("[Oracle CC] sendMessage falhou, re-enfileirando:", err.message);
       isSpeaking = false;
       speakQueue.unshift(text);
@@ -238,10 +238,8 @@
     const raw = text?.trim();
     if (!raw || raw.length < 2) return;
 
-    // FIX Bug #2 — barrar duplicatas pelo texto RAW antes de qualquer trabalho
     if (rawSeenCache.has(raw)) return;
     rawSeenCache.add(raw);
-    // FIX Bug #5 — TTL aumentado de 8s para 30s (mesmo motivo do spokenCache)
     setTimeout(() => rawSeenCache.delete(raw), 30000);
 
     if (sourceEl && isUIElement(sourceEl)) return;
@@ -264,10 +262,8 @@
   // FONTE 1 — TextTrack API (Brightcove/VJS)
   // =========================================================================
   const observedTracks = new WeakSet();
-  const observedVideos = new WeakSet(); // guarda somente o listener addtrack
+  const observedVideos = new WeakSet();
 
-  // FIX Bug #4 (v1.4.0) — attachTrack recebe o elemento <video> para poder
-  // checar video.currentTime dentro do cuechange e descartar cues fora do tempo.
   function attachTrack(track, video) {
     if (!track || observedTracks.has(track)) return;
     observedTracks.add(track);
@@ -279,12 +275,13 @@
       for (const cue of cues) {
         if (!cue?.text) continue;
 
-        // FIX Bug #4 — so narra se o currentTime esta dentro da janela do cue
-        // Tolerancia de 0.3s para compensar imprecisao do evento cuechange
         if (video) {
           const now = video.currentTime;
           if (now < cue.startTime - 0.3 || now > cue.endTime + 0.3) continue;
         }
+
+        // FIX B — sinaliza que Fonte 1 esta ativa; Fonte 2 sera silenciada
+        hasActiveTextTrack = true;
 
         const text = cue.text
           .replace(/<[^>]+>/g, " ")
@@ -296,14 +293,9 @@
     console.log(`[Oracle CC] TextTrack: lang="${track.language ?? "?"}" label="${track.label ?? ""}"`);
   }
 
-  // FIX Bug #3 — re-scan de textTracks ocorre SEMPRE (Brightcove pode recriar
-  // o objeto track); o listener addtrack e registrado apenas uma vez por video
   function attachVideo(video) {
     if (!video) return;
-    // Sempre re-varre as tracks existentes (captura tracks recriadas pelo Brightcove)
-    // Passa o elemento video para attachTrack poder checar currentTime (v1.4.0)
     for (const track of video.textTracks) attachTrack(track, video);
-    // Guard: listener addtrack so uma vez por elemento <video>
     if (observedVideos.has(video)) return;
     observedVideos.add(video);
     video.textTracks.addEventListener("addtrack", (e) => {
@@ -315,6 +307,7 @@
 
   // =========================================================================
   // FONTE 2 — MutationObserver DOM (.vjs-text-track-cue fallback)
+  // FIX B (v1.6.0) — silenciado quando hasActiveTextTrack === true
   // =========================================================================
   const CC_SELECTORS = [
     ".vjs-text-track-cue",
@@ -337,6 +330,9 @@
   function startDOMObserver() {
     if (domObserver) return;
     domObserver = new MutationObserver((mutations) => {
+      // FIX B — Fonte 1 ativa: ignora Fonte 2 completamente
+      if (hasActiveTextTrack) return;
+
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
           if (!node || node.nodeType !== Node.ELEMENT_NODE) continue;
@@ -356,11 +352,11 @@
       }
     });
     domObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
-    console.log("[Oracle CC] MutationObserver DOM ativo.");
+    console.log("[Oracle CC] MutationObserver DOM ativo (Fonte 2 — fallback).");
   }
 
   // =========================================================================
-  // BOOT — observers sobem SEMPRE no load
+  // BOOT
   // =========================================================================
   let videoScanObserver = null;
 
