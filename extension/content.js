@@ -13,16 +13,20 @@
 //             para tolerar tracks recriadas pelo Brightcove
 //
 // v1.4.0 fix:
-//   - Bug #4: cuechange agora valida video.currentTime contra a janela do cue
-//             [startTime - 0.3s, endTime + 0.3s] antes de chamar pipeline().
-//             Evita narrar cues fora do tempo ao voltar/pular no video.
-//             Cirurgia minima: +3 linhas no attachTrack(), arquitetura intacta.
+//   - Bug #4: cuechange valida video.currentTime contra janela do cue
+//             [startTime-0.3s, endTime+0.3s] antes de chamar pipeline()
+//
+// v1.5.0 fix:
+//   - Bug #5: Brightcove re-dispara cuechange para o mesmo cue durante
+//             reproducao normal (re-render do player). TTL de 8s no
+//             rawSeenCache expirava antes do cue terminar, causando loop.
+//             Fix: rawSeenCache TTL 8000->30000ms, spokenCache TTL 10000->30000ms.
 
 (function () {
   if (window.__oracleCCLoaded) return;
   window.__oracleCCLoaded = true;
 
-  console.log("[Oracle CC] Content script iniciado (v1.4.0).");
+  console.log("[Oracle CC] Content script iniciado (v1.5.0).");
 
   // =========================================================================
   // ESTADO
@@ -199,7 +203,9 @@
     const clean = text.replace(/\s+/g, " ").trim();
     if (!clean || spokenCache.has(clean)) return;
     spokenCache.add(clean);
-    setTimeout(() => spokenCache.delete(clean), 10000);
+    // FIX Bug #5 — TTL aumentado de 10s para 30s para cobrir cues longos
+    // e evitar que o Brightcove re-dispare o mesmo cue apos expiracao
+    setTimeout(() => spokenCache.delete(clean), 30000);
     speakQueue.push(clean);
     drainQueue();
   }
@@ -235,7 +241,8 @@
     // FIX Bug #2 — barrar duplicatas pelo texto RAW antes de qualquer trabalho
     if (rawSeenCache.has(raw)) return;
     rawSeenCache.add(raw);
-    setTimeout(() => rawSeenCache.delete(raw), 8000);
+    // FIX Bug #5 — TTL aumentado de 8s para 30s (mesmo motivo do spokenCache)
+    setTimeout(() => rawSeenCache.delete(raw), 30000);
 
     if (sourceEl && isUIElement(sourceEl)) return;
     if (isUIText(raw)) return;
