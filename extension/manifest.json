@@ -1,25 +1,45 @@
 {
   "manifest_version": 3,
-  "name": "Leitor de Legendas Acessível (CC)",
-  "version": "0.1.0",
-  "description": "Lê e narra automaticamente as legendas (Closed Captions) de vídeos na web usando TTS nativo.",
+  "name": "Fernando CC Reader",
+  "version": "1.0.0",
+  "description": "Lê as legendas (CC/VTT) de vídeos da Oracle MyLearn em voz alta em PT-BR, sem servidor, sem captura de áudio.",
   "minimum_chrome_version": "116",
+
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Configurações do Leitor"
+    "default_title": "Fernando CC Reader",
+    "default_icon": {
+      "16":  "icons/icon16.png",
+      "48":  "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
+
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+
   "permissions": [
     "storage",
     "activeTab",
     "tabs",
-    "scripting"
+    "scripting",
+    "tts"
   ],
+
   "host_permissions": [
-    "<all_urls>"
+    "https://mylearn.oracle.com/*",
+    "https://learn.oracle.com/*",
+    "https://education.oracle.com/*"
   ],
+
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "https://mylearn.oracle.com/*",
+        "https://learn.oracle.com/*",
+        "https://education.oracle.com/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
