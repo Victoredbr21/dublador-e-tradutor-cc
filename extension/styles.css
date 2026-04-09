@@ -1,4 +1,7 @@
-/* Fernando CC Reader — popup styles */
+/* Fernando CC Reader — popup styles
+   POP-1: sem estilos de WS/captura
+   POP-3: master switch verde (on) / vermelho (off)
+*/
 
 *, *::before, *::after {
   margin: 0;
@@ -46,46 +49,44 @@ body {
   text-overflow: ellipsis;
 }
 
-/* ---- Toggle principal ---- */
-.toggle-btn {
-  background: none;
+/* ---- Master Switch (POP-3) ----
+   Botao redondo: vermelho quando off, verde quando on.
+   Tamanho generoso para o usuario nao errar o clique.
+*/
+.master-switch {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
   border: none;
   cursor: pointer;
-  padding: 2px;
-  flex-shrink: 0;
-  border-radius: 99px;
-  transition: box-shadow 180ms ease;
-}
-
-.toggle-btn:focus-visible {
-  outline: 2px solid #4f98a3;
-  outline-offset: 2px;
-}
-
-.toggle-track {
   display: flex;
   align-items: center;
-  width: 38px;
-  height: 22px;
-  border-radius: 99px;
-  background: #3f3f46;
-  padding: 2px;
-  transition: background 200ms ease;
-  position: relative;
+  justify-content: center;
+  font-size: 13px;
+  flex-shrink: 0;
+  transition: background 200ms ease, box-shadow 200ms ease, transform 100ms ease;
+  box-shadow: 0 0 0 0 transparent;
 }
 
-.toggle-thumb {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #71717a;
-  transition: transform 200ms ease, background 200ms ease;
-  position: absolute;
-  left: 2px;
+.master-switch.off {
+  background: #7f1d1d;  /* vermelho escuro */
+  color: #fca5a5;
 }
 
-.toggle-btn.on .toggle-track  { background: #4f98a3; }
-.toggle-btn.on .toggle-thumb  { background: #fff; transform: translateX(16px); }
+.master-switch.on {
+  background: #14532d;  /* verde escuro */
+  color: #86efac;
+  box-shadow: 0 0 8px 2px rgba(134, 239, 172, 0.25);
+}
+
+.master-switch:hover.off  { background: #991b1b; }
+.master-switch:hover.on   { background: #166534; }
+.master-switch:active      { transform: scale(0.93); }
+
+.master-switch:focus-visible {
+  outline: 2px solid #4f98a3;
+  outline-offset: 3px;
+}
 
 /* ---- Status bar ---- */
 .status-bar {
@@ -171,7 +172,7 @@ body {
   color: #71717a;
 }
 
-/* ---- Select de voz ---- */
+/* ---- Select (voz e idioma) ---- */
 select {
   width: 100%;
   background: #18181b;
@@ -211,46 +212,6 @@ select:focus {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-
-/* ---- Mini toggle (checkbox tradutor) ---- */
-.mini-toggle {
-  display: inline-flex;
-  align-items: center;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.mini-toggle input[type="checkbox"] {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.mini-track {
-  display: flex;
-  align-items: center;
-  width: 30px;
-  height: 17px;
-  border-radius: 99px;
-  background: #3f3f46;
-  padding: 2px;
-  transition: background 200ms;
-  position: relative;
-}
-
-.mini-thumb {
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: #71717a;
-  position: absolute;
-  left: 2px;
-  transition: transform 200ms, background 200ms;
-}
-
-.mini-toggle input:checked + .mini-track { background: #4f98a3; }
-.mini-toggle input:checked + .mini-track .mini-thumb { background: #fff; transform: translateX(13px); }
 
 /* ---- Footer ---- */
 .footer {

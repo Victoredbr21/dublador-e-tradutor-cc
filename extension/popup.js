@@ -1,83 +1,51 @@
 // popup.js — Fernando CC Reader
-// Gerencia a UI do popup: toggle on/off, sliders, select de voz, display de CC.
 //
-// EX-1: sendToContent usa Promise + catch filtrando "Receiving end does not exist"
-// EX-4: safeSet() envelopa chrome.storage.local.set com catch de quota
+// POP-1: HTML limpo, sem WS/captura/ducking
+// POP-2: sliders usam "input" so para label, "change" para safeSet
+// POP-3: master switch salva readerActive, cor verde/vermelho
+// POP-4: ZERO sendMessage — popup e gravador de config; content.js reage via storage.onChanged
+// EX-1:  sendToContent removido por completo
+// EX-4:  safeSet() com catch de cota
 
 (function () {
 
   // --- Elementos DOM ---
   const btnToggle       = document.getElementById("btn-toggle");
+  const switchIcon      = document.getElementById("switch-icon");
   const statusBar       = document.getElementById("status-bar");
   const statusText      = document.getElementById("status-text");
   const ccOriginal      = document.getElementById("cc-original");
   const ccTranslated    = document.getElementById("cc-translated");
   const labelTranslated = document.getElementById("label-translated");
   const selectVoice     = document.getElementById("select-voice");
+  const selectLang      = document.getElementById("select-lang");
   const sliderRate      = document.getElementById("slider-rate");
   const labelRate       = document.getElementById("label-rate");
   const sliderVolume    = document.getElementById("slider-volume");
   const labelVolume     = document.getElementById("label-volume");
-  const chkTranslate    = document.getElementById("chk-translate");
 
   // --- Estado local ---
   let isEnabled = false;
 
   // =========================================================================
-  // EX-4: Wrapper de escrita no storage com tratamento de cota
-  // Mapeia QUOTA_BYTES_PER_ITEM e QUOTA_BYTES para log descritivo.
+  // EX-4: Escrita segura no storage (sem estouro de cota silencioso)
   // =========================================================================
   function safeSet(data) {
     chrome.storage.local.set(data, () => {
       if (chrome.runtime.lastError) {
         const msg = chrome.runtime.lastError.message ?? "";
-        if (msg.includes("QUOTA_BYTES") || msg.includes("quota")) {
-          console.warn("[Fernando CC] Storage: cota estourada. Dado descartado:", Object.keys(data).join(", "));
+        if (msg.includes("QUOTA_BYTES") || msg.toLowerCase().includes("quota")) {
+          console.warn("[Fernando CC] Storage: cota estourada. Chaves descartadas:", Object.keys(data).join(", "));
         } else {
-          console.error("[Fernando CC] Storage: erro inesperado ao salvar —", msg);
+          console.error("[Fernando CC] Storage: erro inesperado —", msg);
         }
       }
     });
   }
 
   // =========================================================================
-  // EX-1: Envio de mensagem ao content script com tratamento de conexao
-  // Filtra silenciosamente o erro esperado "Receiving end does not exist"
-  // (aba restrita chrome://, aba sem content script carregado ainda).
-  // Outros erros reais sao logados com nivel [warn].
+  // UI helpers
   // =========================================================================
-  async function getActiveTab() {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    return tabs[0] ?? null;
-  }
-
-  async function sendToContent(message) {
-    let tab;
-    try {
-      tab = await getActiveTab();
-    } catch (err) {
-      console.warn("[Fernando CC] Nao foi possivel obter aba ativa:", err.message);
-      return;
-    }
-
-    if (!tab?.id) return;
-
-    // URLs restritas: extensoes nao podem injetar nem enviar mensagens
-    const restricted = /^(chrome|chrome-extension|edge|about|data):/i;
-    if (restricted.test(tab.url ?? "")) return;
-
-    chrome.tabs.sendMessage(tab.id, message).catch((err) => {
-      const msg = err?.message ?? "";
-      // Erro esperado: content script ainda nao carregou ou pagina nao suportada
-      if (msg.includes("Receiving end does not exist") ||
-          msg.includes("Could not establish connection")) {
-        return; // silencioso
-      }
-      console.warn("[Fernando CC] sendMessage falhou —", msg);
-    });
-  }
-
-  // --- Utilitarios de UI ---
   function setStatus(state) {
     statusBar.className = "status-bar " + state;
     const labels = {
@@ -88,44 +56,57 @@
     statusText.textContent = labels[state] ?? "Desativado";
   }
 
+  // POP-3: master switch visual — verde (on) / vermelho (off)
   function setToggleUI(enabled) {
-    btnToggle.classList.toggle("on",   enabled);
+    btnToggle.classList.toggle("on",  enabled);
     btnToggle.classList.toggle("off", !enabled);
     btnToggle.setAttribute("aria-label", enabled ? "Desativar narrador" : "Ativar narrador");
+    // Icone: pause quando ativo, play quando inativo
+    switchIcon.innerHTML = enabled ? "&#9646;&#9646;" : "&#9654;";
     setStatus(enabled ? "listening" : "idle");
   }
 
-  // --- Carrega config salva ---
-  // EX-4: verifica chrome.runtime.lastError apos get tambem
+  // =========================================================================
+  // Inicializacao: carrega config salva
+  // EX-4: verifica lastError na leitura
+  // =========================================================================
   chrome.storage.local.get(
-    ["enabled", "ttsVoice", "ttsRate", "ttsVolume", "translateEN", "lastOriginal", "lastTranslated"],
+    ["readerActive", "ttsVoice", "ttsRate", "ttsVolume", "sourceLang", "lastOriginal", "lastTranslated"],
     (r) => {
       if (chrome.runtime.lastError) {
-        console.error("[Fernando CC] Falha ao ler storage na abertura:", chrome.runtime.lastError.message);
+        console.error("[Fernando CC] Falha ao ler storage:", chrome.runtime.lastError.message);
         return;
       }
 
-      isEnabled = r.enabled ?? false;
+      // POP-3: restaura estado do master switch
+      isEnabled = r.readerActive ?? false;
       setToggleUI(isEnabled);
 
+      // Voz salva
       if (r.ttsVoice) {
-        const opt = selectVoice.querySelector(`option[value="${r.ttsVoice}"]`);
+        const opt = selectVoice.querySelector(`option[value="${CSS.escape(r.ttsVoice)}"]`);
         if (opt) selectVoice.value = r.ttsVoice;
       }
 
+      // Idioma fonte salvo
+      if (r.sourceLang) {
+        const opt = selectLang.querySelector(`option[value="${CSS.escape(r.sourceLang)}"]`);
+        if (opt) selectLang.value = r.sourceLang;
+      }
+
+      // Velocidade
       if (r.ttsRate !== undefined) {
         sliderRate.value      = r.ttsRate;
         labelRate.textContent = Number(r.ttsRate).toFixed(2) + "\u00d7";
       }
 
+      // Volume
       if (r.ttsVolume !== undefined) {
         sliderVolume.value      = r.ttsVolume;
         labelVolume.textContent = Math.round(r.ttsVolume * 100) + "%";
       }
 
-      chkTranslate.checked = r.translateEN !== false; // default true
-
-      // Restaura ultimo CC exibido
+      // Restaura ultimo CC
       if (r.lastOriginal) {
         ccOriginal.textContent = r.lastOriginal;
         if (r.lastTranslated && r.lastTranslated !== r.lastOriginal) {
@@ -137,45 +118,49 @@
     }
   );
 
-  // --- Toggle principal ---
+  // =========================================================================
+  // POP-3 + POP-4: Master Switch — so salva no storage, content.js reage
+  // =========================================================================
   btnToggle.addEventListener("click", () => {
     isEnabled = !isEnabled;
-    safeSet({ enabled: isEnabled }); // EX-4
     setToggleUI(isEnabled);
-    sendToContent({ action: isEnabled ? "enable" : "disable" }); // EX-1
+    safeSet({ readerActive: isEnabled }); // POP-4: sem sendMessage
   });
 
-  // --- Voz ---
+  // =========================================================================
+  // POP-4: Todos os controles apenas dao safeSet no storage
+  // O content.js ouve via storage.onChanged e reage
+  // =========================================================================
+
+  // Voz: change (nao tem label para atualizar ao vivo)
   selectVoice.addEventListener("change", () => {
-    const voice = selectVoice.value;
-    safeSet({ ttsVoice: voice }); // EX-4
-    sendToContent({ action: "set-config", ttsVoice: voice }); // EX-1
+    safeSet({ ttsVoice: selectVoice.value });
   });
 
-  // --- Velocidade ---
+  // Idioma fonte: change
+  selectLang.addEventListener("change", () => {
+    safeSet({ sourceLang: selectLang.value });
+  });
+
+  // POP-2: Rate — "input" so atualiza label, "change" salva no storage
   sliderRate.addEventListener("input", () => {
-    const rate = parseFloat(sliderRate.value);
-    labelRate.textContent = rate.toFixed(2) + "\u00d7";
-    safeSet({ ttsRate: rate }); // EX-4
-    sendToContent({ action: "set-config", ttsRate: rate }); // EX-1
+    labelRate.textContent = parseFloat(sliderRate.value).toFixed(2) + "\u00d7";
+  });
+  sliderRate.addEventListener("change", () => {
+    safeSet({ ttsRate: parseFloat(sliderRate.value) });
   });
 
-  // --- Volume ---
+  // POP-2: Volume — "input" so atualiza label, "change" salva no storage
   sliderVolume.addEventListener("input", () => {
-    const vol = parseFloat(sliderVolume.value);
-    labelVolume.textContent = Math.round(vol * 100) + "%";
-    safeSet({ ttsVolume: vol }); // EX-4
-    sendToContent({ action: "set-config", ttsVolume: vol }); // EX-1
+    labelVolume.textContent = Math.round(parseFloat(sliderVolume.value) * 100) + "%";
+  });
+  sliderVolume.addEventListener("change", () => {
+    safeSet({ ttsVolume: parseFloat(sliderVolume.value) });
   });
 
-  // --- Checkbox tradutor ---
-  chkTranslate.addEventListener("change", () => {
-    const val = chkTranslate.checked;
-    safeSet({ translateEN: val }); // EX-4
-    sendToContent({ action: "set-config", translateEN: val }); // EX-1
-  });
-
-  // --- Recebe atualizacoes em tempo real do content script via storage ---
+  // =========================================================================
+  // Recebe atualizacoes em tempo real do content script via storage.onChanged
+  // =========================================================================
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.lastOriginal) {
       const orig = changes.lastOriginal.newValue;
@@ -198,8 +183,9 @@
         labelTranslated.style.display = "none";
       }
     }
-    if (changes.enabled) {
-      isEnabled = changes.enabled.newValue;
+    // Se o content.js alterar readerActive (ex: auto-desligar), reflete no popup
+    if (changes.readerActive) {
+      isEnabled = changes.readerActive.newValue;
       setToggleUI(isEnabled);
     }
   });
