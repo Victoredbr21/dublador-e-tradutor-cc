@@ -11,12 +11,18 @@
 //   - Bug #2: rawSeenCache barra duplicatas ANTES da traducao (Fonte 1 + Fonte 2)
 //   - Bug #3: attachVideo separa guard addtrack do re-scan de textTracks
 //             para tolerar tracks recriadas pelo Brightcove
+//
+// v1.4.0 fix:
+//   - Bug #4: cuechange agora valida video.currentTime contra a janela do cue
+//             [startTime - 0.3s, endTime + 0.3s] antes de chamar pipeline().
+//             Evita narrar cues fora do tempo ao voltar/pular no video.
+//             Cirurgia minima: +3 linhas no attachTrack(), arquitetura intacta.
 
 (function () {
   if (window.__oracleCCLoaded) return;
   window.__oracleCCLoaded = true;
 
-  console.log("[Oracle CC] Content script iniciado (v1.3.0).");
+  console.log("[Oracle CC] Content script iniciado (v1.4.0).");
 
   // =========================================================================
   // ESTADO
@@ -95,7 +101,7 @@
         rawSeenCache.clear();
         // Re-varre textTracks de cada video (Brightcove pode ter recriado tracks)
         document.querySelectorAll("video").forEach(video => {
-          for (const track of video.textTracks) attachTrack(track);
+          for (const track of video.textTracks) attachTrack(track, video);
         });
         safeSet({ readerStatus: "waiting" });
       }
@@ -253,7 +259,9 @@
   const observedTracks = new WeakSet();
   const observedVideos = new WeakSet(); // guarda somente o listener addtrack
 
-  function attachTrack(track) {
+  // FIX Bug #4 (v1.4.0) — attachTrack recebe o elemento <video> para poder
+  // checar video.currentTime dentro do cuechange e descartar cues fora do tempo.
+  function attachTrack(track, video) {
     if (!track || observedTracks.has(track)) return;
     observedTracks.add(track);
     track.mode = "hidden";
@@ -263,6 +271,14 @@
       if (!cues || cues.length === 0) return;
       for (const cue of cues) {
         if (!cue?.text) continue;
+
+        // FIX Bug #4 — so narra se o currentTime esta dentro da janela do cue
+        // Tolerancia de 0.3s para compensar imprecisao do evento cuechange
+        if (video) {
+          const now = video.currentTime;
+          if (now < cue.startTime - 0.3 || now > cue.endTime + 0.3) continue;
+        }
+
         const text = cue.text
           .replace(/<[^>]+>/g, " ")
           .replace(/&amp;/g, "&").replace(/&lt;/g, "<")
@@ -278,13 +294,14 @@
   function attachVideo(video) {
     if (!video) return;
     // Sempre re-varre as tracks existentes (captura tracks recriadas pelo Brightcove)
-    for (const track of video.textTracks) attachTrack(track);
+    // Passa o elemento video para attachTrack poder checar currentTime (v1.4.0)
+    for (const track of video.textTracks) attachTrack(track, video);
     // Guard: listener addtrack so uma vez por elemento <video>
     if (observedVideos.has(video)) return;
     observedVideos.add(video);
     video.textTracks.addEventListener("addtrack", (e) => {
       console.log(`[Oracle CC] addtrack: "${e?.track?.label ?? "?"}"`);
-      attachTrack(e?.track);
+      attachTrack(e?.track, video);
     });
     console.log(`[Oracle CC] Video anexado.`);
   }
