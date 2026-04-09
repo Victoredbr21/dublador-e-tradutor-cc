@@ -12,12 +12,14 @@
 // v1.5.0 — TTL rawSeenCache/spokenCache 30s (anti-loop Brightcove)
 // v1.6.0 — Fix A: speakQueue maxSize=1 (narrador sempre no presente)
 //           Fix B: hasActiveTextTrack — Fonte 2 silenciada quando Fonte 1 ativa
+// v1.6.1 — reset hasActiveTextTrack ao desligar/religar narrador
+//           (garante que Fonte 2 volta como fallback em players sem TextTrack)
 
 (function () {
   if (window.__oracleCCLoaded) return;
   window.__oracleCCLoaded = true;
 
-  console.log("[Oracle CC] Content script iniciado (v1.6.0).");
+  console.log("[Oracle CC] Content script iniciado (v1.6.1).");
 
   // =========================================================================
   // ESTADO
@@ -28,14 +30,15 @@
   let ttsVolume  = 1.0;
   let sourceLang = "auto";
 
-  const speakQueue  = [];
-  let   isSpeaking  = false;
-  const spokenCache = new Set();
+  const speakQueue   = [];
+  let   isSpeaking   = false;
+  const spokenCache  = new Set();
   const rawSeenCache = new Set();
 
   // FIX B (v1.6.0) — flag: Fonte 1 (TextTrack) esta ativa e disparando cues.
   // Quando true, Fonte 2 (MutationObserver) ignora tudo para evitar duplicatas
   // fragmentadas que causam loop e narrador atrasado em relacao a legenda.
+  // Resetado ao desligar/religar para garantir fallback em players sem TextTrack.
   let hasActiveTextTrack = false;
 
   // =========================================================================
@@ -86,6 +89,7 @@
       if (!isEnabled) {
         speakQueue.length = 0;
         isSpeaking = false;
+        hasActiveTextTrack = false; // v1.6.1 — reset para fallback funcionar no proximo video
         chrome.runtime.sendMessage({ type: "STOP" }).catch(() => {});
         safeSet({ readerStatus: "off" });
         console.log("[Oracle CC] Narrador desligado.");
@@ -93,6 +97,7 @@
         console.log("[Oracle CC] Narrador ligado — varrendo videos existentes.");
         speakQueue.length = 0;
         isSpeaking = false;
+        hasActiveTextTrack = false; // v1.6.1 — reset: deixa Fonte 2 pronta caso nao haja TextTrack
         spokenCache.clear();
         rawSeenCache.clear();
         document.querySelectorAll("video").forEach(video => {
