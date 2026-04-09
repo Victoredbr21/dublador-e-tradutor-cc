@@ -1,58 +1,50 @@
 // content.js — Oracle CC Narrator
 //
-// v2.1.0 — fixes: isSpeaking guard, scheduleStorageWrite order,
-//          STOP antes de trocar voz, popup usa chrome.tts voices
+// Fluxo:
+//   1. bootObservers() sobe no load — independente de readerActive
+//   2. TextTrack API (Brightcove/VJS) + MutationObserver como fallback
+//   3. pipeline() traduz e envia { type: "SPEAK" } para o service worker
+//      (chrome.tts nao funciona em content scripts no Brave — fix v1.2.0)
+//   4. Service worker executa chrome.tts e devolve TTS_DONE para drenar a fila
 //
-// Arquitetura:
-//   - Loop requestAnimationFrame le video.currentTime a cada frame
-//   - Para cada TextTrack ativa, busca o VTTCue cujo startTime <= currentTime < endTime
-//   - So fala se o cue mudou (key = startTime:text) — nunca adianta, nunca atrasa
-//   - Se o video pausa -> TTS para imediatamente
-//   - Se o usuario volta no video -> activeCueKey muda e o narrador recomeca do ponto certo
-//   - Fonte 2 (MutationObserver DOM) REMOVIDA: causava leitura de UI em ingles
-//   - translateCache pre-aquece ao carregar cada track (warm-up silencioso)
+// v1.3.0 fixes:
+//   - Bug #2: rawSeenCache barra duplicatas ANTES da traducao (Fonte 1 + Fonte 2)
+//   - Bug #3: attachVideo separa guard addtrack do re-scan de textTracks
+//             para tolerar tracks recriadas pelo Brightcove
 
 (function () {
   if (window.__oracleCCLoaded) return;
   window.__oracleCCLoaded = true;
 
-  console.log("[Oracle CC] Content script iniciado (v2.1.0).");
+  console.log("[Oracle CC] Content script iniciado (v1.3.0).");
 
-  // ===========================================================================
-  // ESTADO GLOBAL
-  // ===========================================================================
+  // =========================================================================
+  // ESTADO
+  // =========================================================================
   let isEnabled  = false;
   let ttsVoice   = "pt-BR";
   let ttsRate    = 1.1;
   let ttsVolume  = 1.0;
   let sourceLang = "auto";
 
-  // Chave do cue que esta sendo narrado agora: "<startTime>:<rawText>"
-  // Separada por video element para suportar multiplos videos na pagina
-  const activeCueKey = new Map(); // videoEl -> string
+  const speakQueue  = [];
+  let   isSpeaking  = false;
+  const spokenCache = new Set();
 
-  // FIX #1: isSpeaking agora e uma guard de reentrada para speak()
-  // Deve ser setado ANTES do await, nao depois
-  let isSpeaking = false;
+  // FIX Bug #2 — cache de texto RAW (antes de traduzir) para barrar duplicatas
+  // entre Fonte 1 (TextTrack cuechange) e Fonte 2 (MutationObserver DOM)
+  const rawSeenCache = new Set();
 
-  // rAF handle
-  let rafHandle = null;
-
-  // Videos observados
-  const observedVideos = new WeakSet();
-  const observedTracks = new WeakSet();
-
-  // Lista de videos ativos (para o loop rAF)
-  const activeVideos = new Set();
-
-  // ===========================================================================
-  // STORAGE HELPERS
-  // ===========================================================================
+  // =========================================================================
+  // safeSet — wrapper storage com tratamento de cota
+  // =========================================================================
   function safeSet(data) {
     chrome.storage.local.set(data, () => {
       if (!chrome.runtime.lastError) return;
       const msg = chrome.runtime.lastError.message ?? "";
-      if (!msg.includes("QUOTA_BYTES") && !msg.toLowerCase().includes("quota")) {
+      if (msg.includes("QUOTA_BYTES") || msg.toLowerCase().includes("quota")) {
+        console.warn("[Oracle CC] Storage: cota estourada.", Object.keys(data).join(", "));
+      } else {
         console.error("[Oracle CC] Storage erro:", msg);
       }
     });
@@ -64,9 +56,9 @@
     storageWriteTimer = setTimeout(() => safeSet({ lastOriginal: original, lastTranslated: translated }), 80);
   }
 
-  // ===========================================================================
-  // CARREGA CONFIG
-  // ===========================================================================
+  // =========================================================================
+  // CARREGA CONFIG — depois inicia observers
+  // =========================================================================
   chrome.storage.local.get(
     ["readerActive", "ttsVoice", "ttsRate", "ttsVolume", "sourceLang"],
     (r) => {
@@ -81,178 +73,83 @@
         console.log(`[Oracle CC] Config — enabled:${isEnabled} voz:${ttsVoice} rate:${ttsRate} lang:${sourceLang}`);
       }
       bootObservers();
-      if (isEnabled) startLoop();
     }
   );
 
-  // Reage a mudancas do popup em tempo real
+  // Reage a mudancas do popup
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.readerActive) {
       isEnabled = changes.readerActive.newValue;
       if (!isEnabled) {
-        stopAll();
-      } else {
-        console.log("[Oracle CC] Narrador ligado.");
-        activeCueKey.clear();
+        speakQueue.length = 0;
         isSpeaking = false;
+        chrome.runtime.sendMessage({ type: "STOP" }).catch(() => {});
+        safeSet({ readerStatus: "off" });
+        console.log("[Oracle CC] Narrador desligado.");
+      } else {
+        console.log("[Oracle CC] Narrador ligado — varrendo videos existentes.");
+        // FIX Bug #3 — limpa caches ao religar para evitar textos congelados
+        speakQueue.length = 0;
+        isSpeaking = false;
+        spokenCache.clear();
+        rawSeenCache.clear();
+        // Re-varre textTracks de cada video (Brightcove pode ter recriado tracks)
+        document.querySelectorAll("video").forEach(video => {
+          for (const track of video.textTracks) attachTrack(track);
+        });
         safeSet({ readerStatus: "waiting" });
-        startLoop();
       }
     }
-
-    // FIX #3: para o TTS antes de trocar voz, evita voz antiga continuar
-    // e novo cue cair no activeCueKey como "ja narrado"
-    if (changes.ttsVoice) {
-      chrome.runtime.sendMessage({ type: "STOP" }).catch(() => {});
-      isSpeaking = false;
-      activeCueKey.clear();
-      ttsVoice = changes.ttsVoice.newValue;
-    }
-
+    if (changes.ttsVoice)   ttsVoice   = changes.ttsVoice.newValue;
     if (changes.ttsRate)    ttsRate    = changes.ttsRate.newValue;
     if (changes.ttsVolume)  ttsVolume  = changes.ttsVolume.newValue;
     if (changes.sourceLang) sourceLang = changes.sourceLang.newValue;
   });
 
-  // Recebe TTS_DONE do background
+  // Recebe TTS_DONE do service worker para drenar a fila
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === "TTS_DONE") {
       isSpeaking = false;
+      if (speakQueue.length === 0) safeSet({ readerStatus: "waiting" });
+      drainQueue();
     }
   });
 
-  // ===========================================================================
-  // STOP TOTAL
-  // ===========================================================================
-  function stopAll() {
-    isSpeaking = false;
-    activeCueKey.clear();
-    stopLoop();
-    chrome.runtime.sendMessage({ type: "STOP" }).catch(() => {});
-    safeSet({ readerStatus: "off" });
-    console.log("[Oracle CC] Narrador desligado.");
+  // =========================================================================
+  // FILTRO DE UI
+  // =========================================================================
+  const BLOCKED_TAGS = new Set([
+    "BUTTON", "A", "NAV", "HEADER", "FOOTER", "SELECT", "OPTION",
+    "LABEL", "INPUT", "TEXTAREA", "SUMMARY", "DETAILS",
+  ]);
+
+  const UI_PATTERNS = /^(play|pause|stop|mute|unmute|cc|subtitles|settings|fullscreen|volume|next|previous|skip|replay|resume|loading|buffering|\d+:\d+|\d+%|close|cancel|ok|yes|no|submit|save|delete|edit|add|remove|menu|home|back|forward|search|help|info|share|download|upload|log.?in|log.?out|sign.?in|sign.?out)$/i;
+
+  function isUIElement(el) {
+    if (!el) return true;
+    let cur = el;
+    for (let i = 0; i < 5; i++) {
+      if (!cur || cur === document.body) break;
+      if (BLOCKED_TAGS.has(cur.tagName))               return true;
+      if (cur.getAttribute("role") === "button")       return true;
+      if (cur.getAttribute("role") === "menuitem")     return true;
+      if (cur.getAttribute("role") === "navigation")   return true;
+      if (cur.getAttribute("aria-hidden") === "true")  return true;
+      cur = cur.parentElement;
+    }
+    return false;
   }
 
-  // ===========================================================================
-  // LOOP rAF — le currentTime a cada frame e fala o cue ativo
-  // ===========================================================================
-  function startLoop() {
-    if (rafHandle !== null) return; // ja rodando
-    function tick() {
-      if (!isEnabled) { rafHandle = null; return; }
-      rafHandle = requestAnimationFrame(tick);
-      for (const video of activeVideos) {
-        processVideo(video);
-      }
-    }
-    rafHandle = requestAnimationFrame(tick);
-    console.log("[Oracle CC] Loop rAF iniciado.");
+  function isUIText(text) {
+    const t = text.trim();
+    if (t.length < 2 || t.length > 500) return true;
+    if (UI_PATTERNS.test(t)) return true;
+    return false;
   }
 
-  function stopLoop() {
-    if (rafHandle !== null) {
-      cancelAnimationFrame(rafHandle);
-      rafHandle = null;
-    }
-  }
-
-  // ===========================================================================
-  // PROCESSA UM VIDEO A CADA FRAME
-  // ===========================================================================
-  function processVideo(video) {
-    if (!video || video.paused || video.ended) {
-      // Video pausado: para TTS se estava falando deste video
-      if (isSpeaking && activeCueKey.has(video)) {
-        chrome.runtime.sendMessage({ type: "STOP" }).catch(() => {});
-        isSpeaking = false;
-        activeCueKey.delete(video);
-      }
-      return;
-    }
-
-    const now = video.currentTime;
-
-    for (const track of video.textTracks) {
-      if (track.mode === "disabled") continue;
-      if (!track.cues) continue;
-
-      // Busca o cue cujo intervalo cobre o currentTime
-      let activeCue = null;
-      for (const cue of track.cues) {
-        if (cue.startTime <= now && now < cue.endTime) {
-          activeCue = cue;
-          break;
-        }
-      }
-
-      if (!activeCue) continue;
-
-      const rawText = activeCue.text
-        .replace(/<[^>]+>/g, " ")
-        .replace(/&amp;/g, "&").replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">").replace(/&nbsp;/g, " ")
-        .replace(/\s+/g, " ").trim();
-
-      if (!rawText || rawText.length < 2) continue;
-
-      // Chave unica para este cue: startTime + texto
-      const key = `${activeCue.startTime.toFixed(3)}:${rawText}`;
-      if (activeCueKey.get(video) === key) continue; // ja esta narrando este cue
-
-      // FIX #1: so dispara speak() se nao ha outro em andamento
-      if (isSpeaking) continue;
-
-      // Novo cue detectado — atualiza chave e fala
-      activeCueKey.set(video, key);
-      speak(rawText, video, key);
-    }
-  }
-
-  // ===========================================================================
-  // FALA UM CUE (traduz se necessario e envia ao background)
-  // ===========================================================================
-  async function speak(rawText, video, spokenKey) {
-    if (!isEnabled) return;
-
-    // FIX #1: seta isSpeaking ANTES do await para bloquear reentrada
-    isSpeaking = true;
-    safeSet({ readerStatus: "speaking" });
-
-    const lang = resolveLang(rawText);
-    let final  = rawText;
-
-    if (lang !== "pt") {
-      final = await translateToPT(rawText, lang);
-    }
-
-    // FIX #2: verifica validade ANTES de escrever no storage e falar
-    if (!isEnabled) { isSpeaking = false; return; }
-    if (video && video.paused) { isSpeaking = false; return; }
-
-    // Se o cue expirou durante o await (seek manual ou video avancou rapido)
-    if (activeCueKey.get(video) !== spokenKey) {
-      isSpeaking = false;
-      return;
-    }
-
-    // FIX #2: scheduleStorageWrite so roda apos todas as validacoes
-    scheduleStorageWrite(rawText, final);
-
-    chrome.runtime.sendMessage({
-      type:   "SPEAK",
-      text:   final,
-      voice:  ttsVoice,
-      rate:   ttsRate,
-      volume: ttsVolume,
-    }).catch((err) => {
-      console.warn("[Oracle CC] sendMessage falhou:", err.message);
-      isSpeaking = false;
-    });
-  }
-
-  // ===========================================================================
+  // =========================================================================
   // DETECCAO DE IDIOMA
-  // ===========================================================================
+  // =========================================================================
   const PT_MARKERS = /\b(que|de|para|com|uma|um|em|ao|na|no|as|os|se|por|mais|mas|isto|isso|este|esta|como|quando|onde|porque|voce|ele|ela|eles|elas|nos|meu|minha|seu|sua|esse|aqui|ali|la|ja|tambem|ainda|muito|pouco|sempre|nunca|agora|depois|antes|durante|entre|sobre|cada|todo|toda|todos|todas|qualquer)\b/i;
   const EN_MARKERS = /\b(the|is|are|was|were|will|would|could|should|have|has|had|this|that|these|those|with|from|into|onto|upon|about|above|below|between|through|during|before|after|where|when|which|while|because|although|however|therefore|furthermore|nevertheless|meanwhile|otherwise|instead|unless|until|whether|both|either|neither|each|every|another|other|such|same|different|often|always|never|already|just|still|even|only|also|too|very|quite|rather|really|actually|basically|generally|usually|typically|specifically|particularly|especially|certainly|definitely|probably|possibly|perhaps|maybe)\b/i;
 
@@ -268,9 +165,9 @@
     return sourceLang;
   }
 
-  // ===========================================================================
-  // TRADUCAO com cache
-  // ===========================================================================
+  // =========================================================================
+  // TRADUCAO
+  // =========================================================================
   const translateCache = new Map();
 
   async function translateToPT(text, fromLang) {
@@ -289,74 +186,178 @@
     }
   }
 
-  // Pre-aquece o cache de traducao para todos os cues de uma track
-  async function warmUpTrackCache(track) {
-    if (!track.cues) return;
-    for (const cue of track.cues) {
-      const raw = cue.text
-        .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-      if (!raw || raw.length < 2) continue;
-      const lang = resolveLang(raw);
-      if (lang !== "pt") {
-        translateToPT(raw, lang).catch(() => {});
-        await new Promise(r => setTimeout(r, 30));
-      }
-    }
-    console.log(`[Oracle CC] Cache pre-aquecido para track "${track.label ?? track.language ?? "?"}".`);
+  // =========================================================================
+  // FILA TTS — envia para service worker via sendMessage
+  // =========================================================================
+  function enqueue(text) {
+    const clean = text.replace(/\s+/g, " ").trim();
+    if (!clean || spokenCache.has(clean)) return;
+    spokenCache.add(clean);
+    setTimeout(() => spokenCache.delete(clean), 10000);
+    speakQueue.push(clean);
+    drainQueue();
   }
 
-  // ===========================================================================
-  // ATTACH TRACK / VIDEO
-  // ===========================================================================
-  function attachTrack(track, video) {
+  function drainQueue() {
+    if (isSpeaking || speakQueue.length === 0 || !isEnabled) return;
+    isSpeaking = true;
+    const text = speakQueue.shift();
+    safeSet({ readerStatus: "speaking" });
+    chrome.runtime.sendMessage({
+      type:   "SPEAK",
+      text,
+      voice:  ttsVoice,
+      rate:   ttsRate,
+      volume: ttsVolume,
+    }).catch((err) => {
+      // Service worker pode estar dormindo — tenta acordar e re-enqueue
+      console.warn("[Oracle CC] sendMessage falhou, re-enfileirando:", err.message);
+      isSpeaking = false;
+      speakQueue.unshift(text);
+      setTimeout(drainQueue, 500);
+    });
+  }
+
+  // =========================================================================
+  // PIPELINE PRINCIPAL
+  // =========================================================================
+  async function pipeline(text, sourceEl) {
+    if (!isEnabled) return;
+    const raw = text?.trim();
+    if (!raw || raw.length < 2) return;
+
+    // FIX Bug #2 — barrar duplicatas pelo texto RAW antes de qualquer trabalho
+    if (rawSeenCache.has(raw)) return;
+    rawSeenCache.add(raw);
+    setTimeout(() => rawSeenCache.delete(raw), 8000);
+
+    if (sourceEl && isUIElement(sourceEl)) return;
+    if (isUIText(raw)) return;
+
+    const lang  = resolveLang(raw);
+    let   final = raw;
+
+    if (lang !== "pt") {
+      final = await translateToPT(raw, lang);
+      scheduleStorageWrite(raw, final);
+    } else {
+      scheduleStorageWrite(raw, raw);
+    }
+
+    enqueue(final);
+  }
+
+  // =========================================================================
+  // FONTE 1 — TextTrack API (Brightcove/VJS)
+  // =========================================================================
+  const observedTracks = new WeakSet();
+  const observedVideos = new WeakSet(); // guarda somente o listener addtrack
+
+  function attachTrack(track) {
     if (!track || observedTracks.has(track)) return;
     observedTracks.add(track);
-    if (track.mode === "disabled") track.mode = "hidden";
+    track.mode = "hidden";
+    track.addEventListener("cuechange", () => {
+      if (!isEnabled) return;
+      const cues = track.activeCues;
+      if (!cues || cues.length === 0) return;
+      for (const cue of cues) {
+        if (!cue?.text) continue;
+        const text = cue.text
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&amp;/g, "&").replace(/&lt;/g, "<")
+          .replace(/&gt;/g,  ">").replace(/&nbsp;/g, " ");
+        pipeline(text, null);
+      }
+    });
     console.log(`[Oracle CC] TextTrack: lang="${track.language ?? "?"}" label="${track.label ?? ""}"`);
-    if (track.cues && track.cues.length > 0) {
-      warmUpTrackCache(track);
-    } else {
-      track.addEventListener("load", () => warmUpTrackCache(track), { once: true });
-    }
   }
 
+  // FIX Bug #3 — re-scan de textTracks ocorre SEMPRE (Brightcove pode recriar
+  // o objeto track); o listener addtrack e registrado apenas uma vez por video
   function attachVideo(video) {
     if (!video) return;
-    activeVideos.add(video);
-    for (const track of video.textTracks) attachTrack(track, video);
+    // Sempre re-varre as tracks existentes (captura tracks recriadas pelo Brightcove)
+    for (const track of video.textTracks) attachTrack(track);
+    // Guard: listener addtrack so uma vez por elemento <video>
     if (observedVideos.has(video)) return;
     observedVideos.add(video);
     video.textTracks.addEventListener("addtrack", (e) => {
       console.log(`[Oracle CC] addtrack: "${e?.track?.label ?? "?"}"`);
-      attachTrack(e?.track, video);
+      attachTrack(e?.track);
     });
-    new MutationObserver((_, obs) => {
-      if (!document.contains(video)) {
-        activeVideos.delete(video);
-        activeCueKey.delete(video);
-        obs.disconnect();
-      }
-    }).observe(document.body, { childList: true, subtree: true });
     console.log(`[Oracle CC] Video anexado.`);
   }
 
-  // ===========================================================================
-  // BOOT — sobe observers de video
-  // ===========================================================================
-  function bootObservers() {
-    document.querySelectorAll("video").forEach(attachVideo);
+  // =========================================================================
+  // FONTE 2 — MutationObserver DOM (.vjs-text-track-cue fallback)
+  // =========================================================================
+  const CC_SELECTORS = [
+    ".vjs-text-track-cue",
+    ".vjs-text-track-display",
+    "[class*='caption']", "[class*='subtitle']", "[class*='transcript']",
+    "[class*='cc-']", "[class*='-cc']",
+    ".st-subtitle", ".st-caption", "[data-cue]",
+    ".player-caption", ".oj-video-caption",
+  ];
 
-    const videoScanObserver = new MutationObserver((mutations) => {
+  let domObserver = null;
+  let lastDomText = "";
+
+  function matchesCC(node) {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
+    try { return CC_SELECTORS.some(sel => node.matches?.(sel) || node.closest?.(sel)); }
+    catch { return false; }
+  }
+
+  function startDOMObserver() {
+    if (domObserver) return;
+    domObserver = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
           if (!node || node.nodeType !== Node.ELEMENT_NODE) continue;
-          if (node.tagName === "VIDEO") attachVideo(node);
-          node.querySelectorAll?.("video").forEach(attachVideo);
+          if (isUIElement(node)) continue;
+          const text = node.textContent?.trim();
+          if (!text || text === lastDomText) continue;
+          if (matchesCC(node)) { lastDomText = text; pipeline(text, node); }
+        }
+        if (mutation.type === "characterData") {
+          const el = mutation.target?.parentElement;
+          if (!el || isUIElement(el)) continue;
+          if (matchesCC(el)) {
+            const text = mutation.target?.textContent?.trim();
+            if (text && text !== lastDomText) { lastDomText = text; pipeline(text, el); }
+          }
         }
       }
     });
-    videoScanObserver.observe(document.body, { childList: true, subtree: true });
-    console.log("[Oracle CC] videoScanObserver ativo.");
+    domObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+    console.log("[Oracle CC] MutationObserver DOM ativo.");
+  }
+
+  // =========================================================================
+  // BOOT — observers sobem SEMPRE no load
+  // =========================================================================
+  let videoScanObserver = null;
+
+  function bootObservers() {
+    document.querySelectorAll("video").forEach(attachVideo);
+
+    if (!videoScanObserver) {
+      videoScanObserver = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+          for (const node of mutation.addedNodes) {
+            if (!node || node.nodeType !== Node.ELEMENT_NODE) continue;
+            if (node.tagName === "VIDEO") attachVideo(node);
+            node.querySelectorAll?.("video").forEach(attachVideo);
+          }
+        }
+      });
+      videoScanObserver.observe(document.body, { childList: true, subtree: true });
+      console.log("[Oracle CC] videoScanObserver ativo.");
+    }
+
+    startDOMObserver();
 
     if (isEnabled) safeSet({ readerStatus: "waiting" });
   }
