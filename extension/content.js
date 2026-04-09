@@ -1,6 +1,7 @@
 // content.js — Oracle CC Narrator
 //
-// v2.0.0 — Narrador guiado por video.currentTime
+// v2.1.0 — fixes: isSpeaking guard, scheduleStorageWrite order,
+//          STOP antes de trocar voz, popup usa chrome.tts voices
 //
 // Arquitetura:
 //   - Loop requestAnimationFrame le video.currentTime a cada frame
@@ -15,7 +16,7 @@
   if (window.__oracleCCLoaded) return;
   window.__oracleCCLoaded = true;
 
-  console.log("[Oracle CC] Content script iniciado (v2.0.0).");
+  console.log("[Oracle CC] Content script iniciado (v2.1.0).");
 
   // ===========================================================================
   // ESTADO GLOBAL
@@ -30,6 +31,8 @@
   // Separada por video element para suportar multiplos videos na pagina
   const activeCueKey = new Map(); // videoEl -> string
 
+  // FIX #1: isSpeaking agora e uma guard de reentrada para speak()
+  // Deve ser setado ANTES do await, nao depois
   let isSpeaking = false;
 
   // rAF handle
@@ -96,7 +99,16 @@
         startLoop();
       }
     }
-    if (changes.ttsVoice)   ttsVoice   = changes.ttsVoice.newValue;
+
+    // FIX #3: para o TTS antes de trocar voz, evita voz antiga continuar
+    // e novo cue cair no activeCueKey como "ja narrado"
+    if (changes.ttsVoice) {
+      chrome.runtime.sendMessage({ type: "STOP" }).catch(() => {});
+      isSpeaking = false;
+      activeCueKey.clear();
+      ttsVoice = changes.ttsVoice.newValue;
+    }
+
     if (changes.ttsRate)    ttsRate    = changes.ttsRate.newValue;
     if (changes.ttsVolume)  ttsVolume  = changes.ttsVolume.newValue;
     if (changes.sourceLang) sourceLang = changes.sourceLang.newValue;
@@ -187,17 +199,24 @@
       const key = `${activeCue.startTime.toFixed(3)}:${rawText}`;
       if (activeCueKey.get(video) === key) continue; // ja esta narrando este cue
 
+      // FIX #1: so dispara speak() se nao ha outro em andamento
+      if (isSpeaking) continue;
+
       // Novo cue detectado — atualiza chave e fala
       activeCueKey.set(video, key);
-      speak(rawText, video);
+      speak(rawText, video, key);
     }
   }
 
   // ===========================================================================
   // FALA UM CUE (traduz se necessario e envia ao background)
   // ===========================================================================
-  async function speak(rawText, video) {
+  async function speak(rawText, video, spokenKey) {
     if (!isEnabled) return;
+
+    // FIX #1: seta isSpeaking ANTES do await para bloquear reentrada
+    isSpeaking = true;
+    safeSet({ readerStatus: "speaking" });
 
     const lang = resolveLang(rawText);
     let final  = rawText;
@@ -205,22 +224,19 @@
     if (lang !== "pt") {
       final = await translateToPT(rawText, lang);
     }
+
+    // FIX #2: verifica validade ANTES de escrever no storage e falar
+    if (!isEnabled) { isSpeaking = false; return; }
+    if (video && video.paused) { isSpeaking = false; return; }
+
+    // Se o cue expirou durante o await (seek manual ou video avancou rapido)
+    if (activeCueKey.get(video) !== spokenKey) {
+      isSpeaking = false;
+      return;
+    }
+
+    // FIX #2: scheduleStorageWrite so roda apos todas as validacoes
     scheduleStorageWrite(rawText, final);
-
-    // Verifica se o cue ainda e o ativo apos a await (traducao levou tempo)
-    // Se o video avancou e temos outro cue, descarta esta fala
-    if (!isEnabled) return;
-    if (video && video.paused) return;
-
-    // Verifica se o currentTime ainda esta dentro do intervalo do cue original
-    // (evita falar cue que ja passou durante o await da traducao)
-    const currentKey = activeCueKey.get(video);
-    const expectedKey = currentKey; // ja foi setado antes do await
-    // Se a chave mudou durante o await, outro cue tomou o lugar — descarta
-    // (isso so acontece se o video avancou muito rapido, ex: seek manual)
-
-    isSpeaking = true;
-    safeSet({ readerStatus: "speaking" });
 
     chrome.runtime.sendMessage({
       type:   "SPEAK",
@@ -274,7 +290,6 @@
   }
 
   // Pre-aquece o cache de traducao para todos os cues de uma track
-  // (roda em background assim que a track e carregada, sem bloquear nada)
   async function warmUpTrackCache(track) {
     if (!track.cues) return;
     for (const cue of track.cues) {
@@ -283,13 +298,11 @@
       if (!raw || raw.length < 2) continue;
       const lang = resolveLang(raw);
       if (lang !== "pt") {
-        // Fire-and-forget: popula o cache em background
         translateToPT(raw, lang).catch(() => {});
-        // Pequena pausa para nao sobrecarregar a API de traducao
         await new Promise(r => setTimeout(r, 30));
       }
     }
-    console.log(`[Oracle CC] Cache de traducao pre-aquecido para track "${track.label ?? track.language ?? "?"}".`);
+    console.log(`[Oracle CC] Cache pre-aquecido para track "${track.label ?? track.language ?? "?"}".`);
   }
 
   // ===========================================================================
@@ -298,11 +311,8 @@
   function attachTrack(track, video) {
     if (!track || observedTracks.has(track)) return;
     observedTracks.add(track);
-    // Garante que o browser carregue os cues (mode hidden = carrega mas nao exibe)
     if (track.mode === "disabled") track.mode = "hidden";
     console.log(`[Oracle CC] TextTrack: lang="${track.language ?? "?"}" label="${track.label ?? ""}"`);
-    // Pre-aquece cache de traducao em background
-    // Espera os cues carregarem se ainda nao estiverem disponiveis
     if (track.cues && track.cues.length > 0) {
       warmUpTrackCache(track);
     } else {
@@ -320,7 +330,6 @@
       console.log(`[Oracle CC] addtrack: "${e?.track?.label ?? "?"}"`);
       attachTrack(e?.track, video);
     });
-    // Quando video e removido da pagina, limpa do Set
     new MutationObserver((_, obs) => {
       if (!document.contains(video)) {
         activeVideos.delete(video);

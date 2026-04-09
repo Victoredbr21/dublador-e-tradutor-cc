@@ -7,9 +7,10 @@
 // EX-1:  sendToContent removido por completo
 // EX-4:  safeSet() com catch de cota
 //
-// v1.3.0 fix:
-//   - Bug #1: selectVoice agora e populado dinamicamente via speechSynthesis.getVoices()
-//             + evento voiceschanged — exibe as vozes reais do browser (filtradas pt/en)
+// v1.4.0 fix:
+//   FIX #4: populateVoices() agora usa chrome.runtime.sendMessage({ type: 'GET_VOICES' })
+//           que retorna chrome.tts.getVoices() — catalogo correto para o TTS da extensao.
+//           speechSynthesis.getVoices() listava vozes do browser HTML5, catalogo diferente.
 
 (function () {
 
@@ -32,7 +33,7 @@
   let isEnabled = false;
 
   // =========================================================================
-  // EX-4: Escrita segura no storage (sem estouro de cota silencioso)
+  // EX-4: Escrita segura no storage
   // =========================================================================
   function safeSet(data) {
     chrome.storage.local.set(data, () => {
@@ -48,45 +49,50 @@
   }
 
   // =========================================================================
-  // FIX Bug #1 — Vozes dinamicas via speechSynthesis
+  // FIX #4 — Vozes via chrome.tts.getVoices() (API correta para a extensao)
   //
-  // getVoices() e assincrono no Chrome/Brave: as vozes chegam so apos o
-  // evento voiceschanged. Populamos o <select> nesse momento, priorizando
-  // vozes pt-* e en-* (fallback: exibe todas se nenhuma for encontrada).
+  // A API speechSynthesis.getVoices() lista vozes do browser HTML5 — catalogo
+  // diferente do chrome.tts usado pelo background.js. Os nomes nao batem.
+  // Agora pedimos as vozes ao background via GET_VOICES, que chama
+  // chrome.tts.getVoices() e retorna o catalogo real do TTS da extensao.
   // =========================================================================
   function populateVoices(savedVoice) {
-    const voices = speechSynthesis.getVoices();
-    if (!voices.length) return; // ainda nao carregou — voiceschanged vai chamar de novo
+    chrome.runtime.sendMessage({ type: "GET_VOICES" }, (response) => {
+      if (chrome.runtime.lastError || !response?.voices) {
+        console.warn("[Fernando CC] GET_VOICES falhou:", chrome.runtime.lastError?.message);
+        return;
+      }
 
-    const preferred = voices.filter(v => v.lang.startsWith("pt") || v.lang.startsWith("en"));
-    const list = preferred.length ? preferred : voices;
+      const voices = response.voices;
+      const preferred = voices.filter(v =>
+        v.lang && (v.lang.startsWith("pt") || v.lang.startsWith("en"))
+      );
+      const list = preferred.length ? preferred : voices;
 
-    selectVoice.innerHTML = "";
-    list.forEach(v => {
-      const opt = document.createElement("option");
-      opt.value = v.name;
-      opt.textContent = `${v.name} (${v.lang})`;
-      if (v.name === savedVoice) opt.selected = true;
-      selectVoice.appendChild(opt);
+      selectVoice.innerHTML = "";
+
+      // Opcao padrao — deixa o chrome.tts escolher automaticamente
+      const autoOpt = document.createElement("option");
+      autoOpt.value = "pt-BR";
+      autoOpt.textContent = "Automatico (pt-BR)";
+      selectVoice.appendChild(autoOpt);
+
+      list.forEach(v => {
+        const opt = document.createElement("option");
+        opt.value = v.voiceName;
+        opt.textContent = `${v.voiceName} (${v.lang ?? "?"})` ;
+        if (v.voiceName === savedVoice) opt.selected = true;
+        selectVoice.appendChild(opt);
+      });
+
+      // Se nenhuma voz bateu com o salvo, tenta selecionar pt-BR automatico
+      if (savedVoice && selectVoice.value !== savedVoice) {
+        selectVoice.value = "pt-BR";
+      }
+
+      console.log(`[Fernando CC] ${list.length} vozes carregadas do chrome.tts.`);
     });
-
-    // Se nenhuma voz bateu com o salvo, forca o valor para restaurar
-    if (savedVoice && !selectVoice.value) {
-      // voz salva nao esta disponivel — seleciona a primeira pt-BR se existir
-      const ptBR = list.find(v => v.lang === "pt-BR");
-      if (ptBR) selectVoice.value = ptBR.name;
-    }
   }
-
-  // Evento assincrono do browser (Chrome/Brave carregam vozes async)
-  speechSynthesis.addEventListener("voiceschanged", () => {
-    chrome.storage.local.get(["ttsVoice"], r => {
-      populateVoices(r.ttsVoice ?? "");
-    });
-  });
-
-  // Tentativa sincrona (Firefox e alguns contextos carregam na hora)
-  populateVoices("");
 
   // =========================================================================
   // UI helpers
@@ -101,19 +107,16 @@
     statusText.textContent = labels[state] ?? "Desativado";
   }
 
-  // POP-3: master switch visual — verde (on) / vermelho (off)
   function setToggleUI(enabled) {
     btnToggle.classList.toggle("on",  enabled);
     btnToggle.classList.toggle("off", !enabled);
     btnToggle.setAttribute("aria-label", enabled ? "Desativar narrador" : "Ativar narrador");
-    // Icone: pause quando ativo, play quando inativo
     switchIcon.innerHTML = enabled ? "&#9646;&#9646;" : "&#9654;";
     setStatus(enabled ? "listening" : "idle");
   }
 
   // =========================================================================
   // Inicializacao: carrega config salva
-  // EX-4: verifica lastError na leitura
   // =========================================================================
   chrome.storage.local.get(
     ["readerActive", "ttsVoice", "ttsRate", "ttsVolume", "sourceLang", "lastOriginal", "lastTranslated"],
@@ -123,33 +126,27 @@
         return;
       }
 
-      // POP-3: restaura estado do master switch
       isEnabled = r.readerActive ?? false;
       setToggleUI(isEnabled);
 
-      // FIX Bug #1: popula vozes com o valor salvo
-      // (populateVoices ja foi chamada sem savedVoice; chama de novo com o salvo)
-      if (r.ttsVoice) populateVoices(r.ttsVoice);
+      // FIX #4: carrega vozes do chrome.tts com o valor salvo
+      populateVoices(r.ttsVoice ?? "");
 
-      // Idioma fonte salvo
       if (r.sourceLang) {
         const opt = selectLang.querySelector(`option[value="${CSS.escape(r.sourceLang)}"]`);
         if (opt) selectLang.value = r.sourceLang;
       }
 
-      // Velocidade
       if (r.ttsRate !== undefined) {
         sliderRate.value      = r.ttsRate;
         labelRate.textContent = Number(r.ttsRate).toFixed(2) + "\u00d7";
       }
 
-      // Volume
       if (r.ttsVolume !== undefined) {
         sliderVolume.value      = r.ttsVolume;
         labelVolume.textContent = Math.round(r.ttsVolume * 100) + "%";
       }
 
-      // Restaura ultimo CC
       if (r.lastOriginal) {
         ccOriginal.textContent = r.lastOriginal;
         if (r.lastTranslated && r.lastTranslated !== r.lastOriginal) {
@@ -162,30 +159,25 @@
   );
 
   // =========================================================================
-  // POP-3 + POP-4: Master Switch — so salva no storage, content.js reage
+  // POP-3 + POP-4: Master Switch
   // =========================================================================
   btnToggle.addEventListener("click", () => {
     isEnabled = !isEnabled;
     setToggleUI(isEnabled);
-    safeSet({ readerActive: isEnabled }); // POP-4: sem sendMessage
+    safeSet({ readerActive: isEnabled });
   });
 
   // =========================================================================
-  // POP-4: Todos os controles apenas dao safeSet no storage
-  // O content.js ouve via storage.onChanged e reage
+  // Controles — apenas safeSet no storage
   // =========================================================================
-
-  // Voz: change — salva o nome da voz selecionada
   selectVoice.addEventListener("change", () => {
     safeSet({ ttsVoice: selectVoice.value });
   });
 
-  // Idioma fonte: change
   selectLang.addEventListener("change", () => {
     safeSet({ sourceLang: selectLang.value });
   });
 
-  // POP-2: Rate — "input" so atualiza label, "change" salva no storage
   sliderRate.addEventListener("input", () => {
     labelRate.textContent = parseFloat(sliderRate.value).toFixed(2) + "\u00d7";
   });
@@ -193,7 +185,6 @@
     safeSet({ ttsRate: parseFloat(sliderRate.value) });
   });
 
-  // POP-2: Volume — "input" so atualiza label, "change" salva no storage
   sliderVolume.addEventListener("input", () => {
     labelVolume.textContent = Math.round(parseFloat(sliderVolume.value) * 100) + "%";
   });
@@ -226,7 +217,6 @@
         labelTranslated.style.display = "none";
       }
     }
-    // Se o content.js alterar readerActive (ex: auto-desligar), reflete no popup
     if (changes.readerActive) {
       isEnabled = changes.readerActive.newValue;
       setToggleUI(isEnabled);
