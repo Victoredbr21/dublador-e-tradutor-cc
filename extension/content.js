@@ -15,6 +15,7 @@
 // v1.6.1 — reset hasActiveTextTrack ao desligar/religar narrador
 //           (garante que Fonte 2 volta como fallback em players sem TextTrack)
 // v1.7.0 — remove logs de debug (producao limpa)
+// v1.7.1 — remove console.log spam: on/off narrador + fila cheia
 
 (function () {
   if (window.__oracleCCLoaded) return;
