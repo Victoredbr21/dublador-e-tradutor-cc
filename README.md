@@ -2,7 +2,7 @@
 
 > Extensão para Google Chrome / Brave que lê em voz alta as legendas dos cursos **Oracle MyLearn** — tradução automática para PT-BR incluída, sincronizada em tempo real com o player.
 
-![Status](https://img.shields.io/badge/status-beta-yellow) ![Versão](https://img.shields.io/badge/vers%C3%A3o-1.7.0-blue) ![Manifest](https://img.shields.io/badge/manifest-v3-blue) ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green)
+![Status](https://img.shields.io/badge/status-beta-yellow) ![Versão](https://img.shields.io/badge/vers%C3%A3o-1.8.0-blue) ![Manifest](https://img.shields.io/badge/manifest-v3-blue) ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green)
 
 ---
 
@@ -22,11 +22,50 @@ Os cursos do Oracle MyLearn são em inglês. Essa extensão lê as legendas do v
 - ▶️ **Botão liga/desliga** com memória de estado
 - 🔊 **Seletor de voz** — vozes PT-BR nativas do seu browser
 - 🌎 **Seletor de idioma** — detecta automático ou você fixa (inglês, espanhol etc.)
-- ⏩ **Velocidade ajustável** — de 0.5× a 2.0×
 - 🔉 **Volume independente** do vídeo
 - 📺 **Display de legenda** no popup: mostra o texto original e a tradução em tempo real
 - 🔄 **Cache de tradução** — evita requisições repetidas ao Google Translate
 - 🛑 **Fila inteligente** — o narrador sempre fala a legenda do presente, nunca acumula atraso
+
+---
+
+## ⚙️ Configuração obrigatória antes de usar
+
+> Esta seção é a mais importante. Pule esses passos e o narrador **não vai funcionar corretamente**.
+
+### Passo A — Ativar a legenda em Português no player
+
+O narrador depende da legenda do player para funcionar. Você precisa **configurar manualmente** a legenda para Português antes de ligar a extensão.
+
+**Como fazer:**
+
+1. Abra o vídeo no Oracle MyLearn
+2. Clique no botão **CC** na barra de controles do player para abrir as opções de legenda
+3. No menu que aparece no canto direito, selecione **`Português`**
+4. A legenda em português vai aparecer no vídeo — confirme que está funcionando antes de ligar o narrador
+
+> 💡 Com a legenda já em PT, selecione **"Português (sem traduzir)"** no seletor de idioma da extensão para uma experiência ainda mais fluida — o narrador lê direto sem precisar acionar o Google Translate.
+
+![Configuração da legenda PT no player Oracle](docs/oracle_cc_setup.jpg)
+
+*Configure a legenda para Português no player antes de ligar o narrador*
+
+---
+
+### Passo B — ⚠️ VELOCIDADE DO VÍDEO: MANTER SEMPRE EM 1×
+
+<h3 align="left"><span style="color:red">⚠️🚨 ATENÇÃO: NÃO ALTERE A VELOCIDADE DO VÍDEO</span></h3>
+
+> ### <span style="color:red">⚠️ **NUNCA altere a velocidade do player para 1.5×, 2× ou qualquer valor diferente de 1×.**</span>
+>
+> **Manter o player em 1× é obrigatório para o narrador funcionar corretamente.**
+>
+> O narrador fala na velocidade interna de **2× (hardcoded)** — isso já é suficiente para acompanhar o ritmo da fala. Se você aumentar a velocidade do vídeo também, as legendas chegam mais rápido do que o narrador consegue processar, causando:
+> - 🔇 Palavras e frases inteiras sendo cortadas
+> - 🔀 Narrador completamente fora de sincronia
+> - ❌ Experiência ruim e ininteligível
+
+**✅ Configuração correta:** velocidade do player = **1×** | velocidade do narrador = **2× (automático)**
 
 ---
 
@@ -125,15 +164,9 @@ Entre em [mylearn.oracle.com](https://mylearn.oracle.com), escolha um curso com 
 
 ---
 
-### 2. Ative as legendas (CC) no player
+### 2. Configure a legenda para Português (obrigatório)
 
-Esse passo é **obrigatório**. A extensão lê as legendas do player — se elas estiverem desligadas, não tem o que narrar.
-
-Procure o botão **`CC`** na barra de controles do player e clique para ativar.
-
-```
-[ ►  ]  [🔉]  [0:23 / 4:15]  [CC]  [⛶]  ← ative aqui
-```
+Siga o **[Passo A da seção de configuração](#passo-a--ativar-a-legenda-em-português-no-player)** acima antes de continuar.
 
 ---
 
@@ -141,7 +174,7 @@ Procure o botão **`CC`** na barra de controles do player e clique para ativar.
 
 > 💡 **Dica importante:** ligue o narrador **depois** de dar play no vídeo, não antes.
 >
-> Se você ligar o narrador antes do play, o player ainda não está ativo e o narrador pode começar a processar as legendas fora de sincronia, falando em inglês ou adiantado. Dando play primeiro e depois ligando o narrador, a sincronização é perfeita desde o início.
+> Se você ligar o narrador antes do play, o player ainda não está ativo e o narrador pode começar a processar as legendas fora de sincronia. Dando play primeiro e depois ligando o narrador, a sincronização é perfeita desde o início.
 
 ---
 
@@ -172,11 +205,10 @@ O narrador vai começar a falar junto com as legendas. 🎉
 | Opção | O que faz | Recomendado |
 |--------|-----------|-------------|
 | **Voz** | Qual voz vai narrar | Selecione uma voz PT-BR |
-| **Idioma da legenda** | Idioma do vídeo original | Deixe "Detectar auto" ou fixe em "Inglês" |
-| **Velocidade** | Quão rápido o narrador fala | 1.1× a 1.3× é confortável |
+| **Idioma da legenda** | Idioma do vídeo original | "Português (sem traduzir)" se configurou legenda PT no player |
 | **Volume** | Volume do narrador | 100% |
 
-> 💡 **Dica:** se você sabe que o curso é em inglês, fixe o idioma como **Inglês (en)** no seletor. Fica mais rápido pois pula a detecção automática.
+> 💡 **Dica:** se configurou a legenda do player para Português, selecione **"Português (sem traduzir)"** no idioma da extensão. Fica mais rápido pois pula a tradução automática.
 
 ---
 
@@ -184,11 +216,11 @@ O narrador vai começar a falar junto com as legendas. 🎉
 
 | Situação | O que acontece |
 |-----------|----------------|
-| Vídeo rodando normalmente | Narrador fala exatamente a legenda que está na tela |
+| Vídeo rodando normalmente (1×) | Narrador fala exatamente a legenda que está na tela |
 | Você pausa o vídeo | TTS para imediatamente |
 | Você avança com seek | Narrador pula para a nova posição |
 | Você retrocede | Narrador recua junto |
-| Vídeo em velocidade 1.5× ou 2× | Narrador acompanha sem atrasar |
+| ❌ Vídeo em velocidade 1.5× ou 2× | Narrador perde sincronia — **não faça isso** |
 
 ---
 
@@ -197,7 +229,8 @@ O narrador vai começar a falar junto com as legendas. 🎉
 | Sintoma | Causa provável | Solução |
 |---------|---------------|----------|
 | Nenhum áudio sai | Voz PT-BR não instalada no SO | Instalar voz conforme seção [Vozes](#-vozes) |
-| Legenda não detectada | CC do player está desligado | Ativar botão CC no player do vídeo |
+| Legenda não detectada | CC do player está desligado | Ativar botão CC no player e selecionar Português |
+| Narrador come palavras | Velocidade do vídeo acima de 1× | **Manter vídeo sempre em 1×** |
 | Tradução falhou | Sem internet ou Google Translate bloqueado | Narrador fala o texto original como fallback |
 | Erro `not-allowed` no console | Autoplay bloqueado pelo browser | Clicar em qualquer lugar da página antes do play |
 | Extensão atualizada mas não funcionou | Cache do content script antigo | `chrome://extensions` → botão 🔄 na extensão |
@@ -208,7 +241,7 @@ Isso pode acontecer quando o narrador é ligado antes do vídeo estar tocando, o
 
 **Pause o vídeo e dê play novamente.**
 
-O narrador reinicia a sincronização automaticamente ao retomar o vídeo. Na grande maioria dos casos, basta esse ciclo de pausa/play para o narrador voltar a funcionar perfeitamente em PT-BR.
+O narrador reinicia a sincronização automaticamente ao retomar o vídeo.
 
 ---
 
@@ -243,8 +276,8 @@ sudo apt install espeak-ng
 dublador-e-tradutor-cc/
 └── extension/
     ├── manifest.json     ← Manifest V3, permissões mínimas
-    ├── content.js        ← TextTrack API + MutationObserver + pipeline de tradução
-    ├── background.js     ← Service worker: executa chrome.tts
+    ├── content.js        ← TextTrack API + MutationObserver + buffer de chunks + pipeline
+    ├── background.js     ← Service worker: executa chrome.tts (velocidade 2× hardcoded)
     ├── popup.html        ← Interface do popup
     ├── popup.js          ← Gravador de config
     ├── styles.css        ← Dark theme
@@ -258,22 +291,23 @@ dublador-e-tradutor-cc/
         │
         └── bootObservers() detecta <video> dinamicamente
               └── attachVideo() → attachTrack()
-                    └── cuechange → pipeline()
-                          ├── detectLang() / resolveLang()
-                          ├── translateToPT() → Google Translate (com cache)
-                          └── enqueue() → drainQueue()
-                                └── sendMessage({ type: "SPEAK" })
-                                      ↓
-                              [background.js — Service Worker]
-                                      └── chrome.tts.speak()
-                                            └── TTS_DONE → drainQueue()
+                    └── cuechange → pipeline() → bufferChunk(350ms)
+                          └── pipelineFinal()
+                                ├── resolveLang()
+                                ├── translateToPT() se necessário → Google Translate (com cache)
+                                └── enqueue() → drainQueue()
+                                      └── sendMessage({ type: "SPEAK" })
+                                            ↓
+                                    [background.js — Service Worker]
+                                            └── chrome.tts.speak({ rate: 2.0 })
+                                                  └── TTS_DONE → drainQueue()
 ```
 
 ---
 
 ## 🛡️ Privacidade
 
-- Os textos das legendas são enviados **apenas** para `translate.googleapis.com` (endpoint público do Google Tradutor, sem autenticação)
+- Os textos das legendas são enviados **apenas** para `translate.googleapis.com` (endpoint público do Google Tradutor, sem autenticação) — e somente quando o idioma não for Português
 - Nenhum dado é enviado para servidores externos além desse
 - A extensão não monitora sua navegação, não acessa sua conta Oracle e não tem analytics
 - Toda configuração fica salva localmente no `chrome.storage.local`
