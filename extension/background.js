@@ -5,7 +5,7 @@
 // e o service worker executa o chrome.tts.
 //
 // Arquitetura:
-//   content.js  -->  chrome.runtime.sendMessage({ type: "SPEAK", text, voice, rate, volume })
+//   content.js  -->  chrome.runtime.sendMessage({ type: "SPEAK", text, voice, volume })
 //   background  -->  chrome.tts.speak()
 //
 // v1.3.1 fix:
@@ -14,6 +14,14 @@
 //   O chrome.tts.speak() espera { lang, voiceName } separados — passar o voiceName
 //   no campo lang fazia o TTS silenciar sem erro nenhum.
 //   Agora resolveVoice() extrai o lang correto e passa voiceName quando disponivel.
+//
+// v1.8.0:
+//   rate fixo = 2.0 (hardcoded aqui, removido do popup e do content.js).
+//   Velocidade 2x sincroniza melhor o narrador com as legendas fragmentadas
+//   do player Brightcove/VJS. Sem controle externo, sem risco de dessincronizar.
+
+// Taxa de fala fixa — nao exposta no popup (v1.8.0)
+const TTS_RATE = 2.0;
 
 // Mapa de prefixos de voiceName para lang BCP-47 usado pelo chrome.tts
 const VOICE_LANG_MAP = [
@@ -37,13 +45,6 @@ const VOICE_LANG_MAP = [
  * ou um voiceName como "pt-BR-AntonioNeural" ou
  * "Microsoft Antonio Online (Natural) - Portuguese (Brazil)"),
  * retorna { lang, voiceName } prontos para chrome.tts.speak().
- *
- * Logica:
- *  1. Se o valor bate exatamente com um lang do mapa -> usa so o lang (sem voiceName),
- *     deixando o chrome.tts escolher a melhor voz disponivel para o idioma.
- *  2. Se comeca com um prefixo conhecido (ex: "pt-BR-Antonio...") -> extrai o lang
- *     e passa o valor completo como voiceName para tentar a voz especifica.
- *  3. Fallback: lang "pt-BR" sem voiceName.
  */
 function resolveVoice(voice) {
   if (!voice) return { lang: "pt-BR" };
@@ -57,7 +58,6 @@ function resolveVoice(voice) {
   if (prefixMatch) return { lang: prefixMatch.lang, voiceName: voice };
 
   // Caso 3: voiceName opaco (ex: "Microsoft Antonio Online (Natural) - Portuguese (Brazil)")
-  // Tenta extrair o lang do parentese final, senao usa pt-BR como fallback
   const parenLang = voice.match(/\(([a-z]{2}[-_][A-Z]{2})\)\s*$/);
   if (parenLang) return { lang: parenLang[1].replace("_", "-"), voiceName: voice };
 
@@ -75,7 +75,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
     const ttsOptions = {
       lang,
-      rate:   msg.rate   ?? 1.1,
+      rate:   TTS_RATE,
       volume: msg.volume ?? 1.0,
       onEvent: (ev) => {
         if (ev.type === "end" || ev.type === "cancelled") {
@@ -93,10 +93,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       }
     };
 
-    // So inclui voiceName se foi resolvido — evita rejeicao por nome inexistente
     if (voiceName) ttsOptions.voiceName = voiceName;
-
-    console.log(`[Oracle CC BG] SPEAK lang:${lang} voiceName:${voiceName ?? "auto"} rate:${ttsOptions.rate}`);
 
     chrome.tts.stop();
     chrome.tts.speak(msg.text, ttsOptions);
@@ -115,8 +112,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     chrome.tts.getVoices((voices) => {
       sendResponse({ voices });
     });
-    return true; // async
+    return true;
   }
 });
-
-console.log("[Oracle CC BG] Service worker iniciado.");

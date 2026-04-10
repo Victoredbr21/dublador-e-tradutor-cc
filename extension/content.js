@@ -16,6 +16,10 @@
 //           (garante que Fonte 2 volta como fallback em players sem TextTrack)
 // v1.7.0 — remove logs de debug (producao limpa)
 // v1.7.1 — remove console.log spam: on/off narrador + fila cheia
+// v1.8.0 — Fix 1: MAX_QUEUE_SIZE 1→3 (menos descarte de chunks consecutivos)
+//           Fix 2: buffer 350ms junta fragmentos do player antes de ir ao TTS
+//                  (resolve narrador comendo pedacos de palavras)
+//           Fix 5: ttsRate removido do content — background usa rate fixo=2.0
 
 (function () {
   if (window.__oracleCCLoaded) return;
@@ -26,7 +30,6 @@
   // =========================================================================
   let isEnabled  = false;
   let ttsVoice   = "pt-BR";
-  let ttsRate    = 1.1;
   let ttsVolume  = 1.0;
   let sourceLang = "auto";
 
@@ -40,6 +43,29 @@
   // fragmentadas que causam loop e narrador atrasado em relacao a legenda.
   // Resetado ao desligar/religar para garantir fallback em players sem TextTrack.
   let hasActiveTextTrack = false;
+
+  // =========================================================================
+  // FIX 2 (v1.8.0) — BUFFER DE CHUNKS
+  // O player Brightcove/VJS emite cues fragmentados (1-2 linhas por evento).
+  // Acumulamos os fragmentos por CHUNK_BUFFER_MS e enviamos o texto junto,
+  // evitando que o TTS fale palavras cortadas no meio.
+  // =========================================================================
+  const CHUNK_BUFFER_MS = 350;
+  let chunkBuffer = [];
+  let chunkTimer  = null;
+
+  function flushChunkBuffer() {
+    if (!chunkBuffer.length) return;
+    const joined = chunkBuffer.join(" ").replace(/\s+/g, " ").trim();
+    chunkBuffer  = [];
+    pipelineFinal(joined);
+  }
+
+  function bufferChunk(text) {
+    chunkBuffer.push(text);
+    clearTimeout(chunkTimer);
+    chunkTimer = setTimeout(flushChunkBuffer, CHUNK_BUFFER_MS);
+  }
 
   // =========================================================================
   // safeSet
@@ -66,14 +92,13 @@
   // CARREGA CONFIG
   // =========================================================================
   chrome.storage.local.get(
-    ["readerActive", "ttsVoice", "ttsRate", "ttsVolume", "sourceLang"],
+    ["readerActive", "ttsVoice", "ttsVolume", "sourceLang"],
     (r) => {
       if (chrome.runtime.lastError) {
         console.error("[Oracle CC] Falha ao ler storage:", chrome.runtime.lastError.message);
       } else {
         if (r.readerActive !== undefined) isEnabled  = r.readerActive;
         if (r.ttsVoice     !== undefined) ttsVoice   = r.ttsVoice;
-        if (r.ttsRate      !== undefined) ttsRate    = r.ttsRate;
         if (r.ttsVolume    !== undefined) ttsVolume  = r.ttsVolume;
         if (r.sourceLang   !== undefined) sourceLang = r.sourceLang;
       }
@@ -89,12 +114,16 @@
         speakQueue.length = 0;
         isSpeaking = false;
         hasActiveTextTrack = false;
+        chunkBuffer = [];
+        clearTimeout(chunkTimer);
         chrome.runtime.sendMessage({ type: "STOP" }).catch(() => {});
         safeSet({ readerStatus: "off" });
       } else {
         speakQueue.length = 0;
         isSpeaking = false;
         hasActiveTextTrack = false;
+        chunkBuffer = [];
+        clearTimeout(chunkTimer);
         spokenCache.clear();
         rawSeenCache.clear();
         document.querySelectorAll("video").forEach(video => {
@@ -104,7 +133,6 @@
       }
     }
     if (changes.ttsVoice)   ttsVoice   = changes.ttsVoice.newValue;
-    if (changes.ttsRate)    ttsRate    = changes.ttsRate.newValue;
     if (changes.ttsVolume)  ttsVolume  = changes.ttsVolume.newValue;
     if (changes.sourceLang) sourceLang = changes.sourceLang.newValue;
   });
@@ -192,10 +220,10 @@
   // FILA TTS
   // =========================================================================
 
-  // FIX A (v1.6.0) — maxQueueSize=1: se ja tem 1 item esperando na fila,
-  // descarta o mais velho e coloca o novo. Narrador sempre no presente
-  // da legenda, nunca acumula frases de cues passados.
-  const MAX_QUEUE_SIZE = 1;
+  // Fix 1 (v1.8.0) — MAX_QUEUE_SIZE 1→3
+  // Permite 3 chunks na fila enquanto o TTS fala, reduzindo descarte de frases
+  // consecutivas que chegam no intervalo entre um cue e outro.
+  const MAX_QUEUE_SIZE = 3;
 
   function enqueue(text) {
     const clean = text.replace(/\s+/g, " ").trim();
@@ -220,7 +248,6 @@
       type:   "SPEAK",
       text,
       voice:  ttsVoice,
-      rate:   ttsRate,
       volume: ttsVolume,
     }).catch((err) => {
       console.warn("[Oracle CC] sendMessage falhou, re-enfileirando:", err.message);
@@ -232,17 +259,18 @@
 
   // =========================================================================
   // PIPELINE PRINCIPAL
+  // Recebe texto bruto de qualquer fonte, filtra, traduz se necessario,
+  // e chama enqueue. Chamado pelo buffer de chunks (pipelineFinal) ou
+  // diretamente quando o sourceLang ja e conhecido como 'pt'.
   // =========================================================================
-  async function pipeline(text, sourceEl) {
+  async function pipelineFinal(raw) {
     if (!isEnabled) return;
-    const raw = text?.trim();
     if (!raw || raw.length < 2) return;
 
     if (rawSeenCache.has(raw)) return;
     rawSeenCache.add(raw);
     setTimeout(() => rawSeenCache.delete(raw), 30000);
 
-    if (sourceEl && isUIElement(sourceEl)) return;
     if (isUIText(raw)) return;
 
     const lang  = resolveLang(raw);
@@ -256,6 +284,17 @@
     }
 
     enqueue(final);
+  }
+
+  // pipeline() — entrada publica de todas as fontes.
+  // Filtra elemento de UI, adiciona ao rawSeenCache parcial (pre-buffer)
+  // e encaminha para o buffer de chunks.
+  function pipeline(text, sourceEl) {
+    if (!isEnabled) return;
+    const raw = text?.trim();
+    if (!raw || raw.length < 2) return;
+    if (sourceEl && isUIElement(sourceEl)) return;
+    bufferChunk(raw);
   }
 
   // =========================================================================

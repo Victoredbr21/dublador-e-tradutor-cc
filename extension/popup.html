@@ -80,15 +80,11 @@
         <option value="ko">Coreano (ko)</option>
         <option value="pt">Portugu&ecirc;s (sem traduzir)</option>
       </select>
-    </div>
-
-    <!-- Config: Velocidade -->
-    <div class="section">
-      <label class="section-label" for="slider-rate">&#9193; Velocidade</label>
-      <div class="slider-wrap">
-        <input type="range" id="slider-rate" min="0.5" max="2.0" value="1.1" step="0.05">
-        <span id="label-rate" class="slider-val">1.10&times;</span>
-      </div>
+      <!-- Dica: selecione PT quando o vídeo já tiver legenda em português -->
+      <p id="lang-hint" class="field-hint" style="display:none">
+        &#9432; Legenda j&aacute; est&aacute; em PT &mdash; tradu&ccedil;&atilde;o desativada.
+        Ideal quando o curso oferece legenda em portugu&ecirc;s no player.
+      </p>
     </div>
 
     <!-- Config: Volume -->
@@ -100,7 +96,7 @@
       </div>
     </div>
 
-    <div class="footer">v1.1.0 &middot; Oracle MyLearn</div>
+    <div class="footer">v1.8.0 &middot; Oracle MyLearn</div>
   </div>
   <script src="popup.js"></script>
 </body>
