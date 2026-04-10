@@ -29,6 +29,9 @@ Os cursos do Oracle MyLearn são em inglês. Essa extensão lê as legendas do v
 
 ---
 
+<img width="295" height="399" alt="image" src="https://github.com/user-attachments/assets/3956c2d4-9216-4f8c-984f-f819c7431ece" />
+
+
 ## ⚙️ Configuração obrigatória antes de usar
 
 > Esta seção é a mais importante. Pule esses passos e o narrador **não vai funcionar corretamente**.
@@ -165,6 +168,9 @@ Entre em [mylearn.oracle.com](https://mylearn.oracle.com), escolha um curso com 
 ---
 
 ### 2. Configure a legenda para Português (obrigatório)
+
+<img width="1904" height="1066" alt="image" src="https://github.com/user-attachments/assets/a2b422a9-3b03-49f4-84ac-bf44d71d10af" />
+
 
 Siga o **[Passo A da seção de configuração](#passo-a--ativar-a-legenda-em-português-no-player)** acima antes de continuar.
 
