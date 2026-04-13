@@ -1,27 +1,16 @@
 // content.js — Oracle CC Narrator
 //
+// v1.9.1 — fix loop safetyTimer + dedup por startTime + MAX_QUEUE=1
+//
 // Fluxo:
 //   1. bootObservers() sobe no load — independente de readerActive
 //   2. TextTrack API (Brightcove/VJS) + MutationObserver como fallback
 //   3. pipeline() traduz e envia { type: "SPEAK" } para o service worker
-//      (chrome.tts nao funciona em content scripts no Brave — fix v1.2.0)
 //   4. Service worker executa chrome.tts e devolve TTS_DONE para drenar a fila
 //
-// v1.3.0 — rawSeenCache barra duplicatas antes da traducao
-// v1.4.0 — cuechange valida video.currentTime contra janela do cue
-// v1.5.0 — TTL rawSeenCache/spokenCache 30s (anti-loop Brightcove)
-// v1.6.0 — Fix A: speakQueue maxSize=1 (narrador sempre no presente)
-//           Fix B: hasActiveTextTrack — Fonte 2 silenciada quando Fonte 1 ativa
-// v1.6.1 — reset hasActiveTextTrack ao desligar/religar narrador
-//           (garante que Fonte 2 volta como fallback em players sem TextTrack)
-// v1.7.0 — remove logs de debug (producao limpa)
-// v1.7.1 — remove console.log spam: on/off narrador + fila cheia
-// v1.8.0 — Fix 1: MAX_QUEUE_SIZE 1→3 (menos descarte de chunks consecutivos)
-//           Fix 2: buffer 350ms junta fragmentos do player antes de ir ao TTS
-//                  (resolve narrador comendo pedacos de palavras)
-//           Fix 5: ttsRate removido do content — background usa rate fixo=2.0
-// v1.9.0 — Fix loop: timeout de segurança 15s em drainQueue() para desbloquear
-//           isSpeaking caso TTS_DONE nunca chegue (ex: service worker caiu)
+// Dedup de cues: spokenCueIds identifica cues por "trackId:startTime".
+// O player Oracle re-dispara cuechange pro mesmo cue N vezes (ABR, re-render).
+// Barrar pelo startTime e mais confiavel que cache de texto com TTL.
 
 (function () {
   if (window.__oracleCCLoaded) return;
@@ -35,23 +24,16 @@
   let ttsVolume  = 1.0;
   let sourceLang = "auto";
 
-  const speakQueue   = [];
-  let   isSpeaking   = false;
-  let   safetyTimer  = null;  // v1.9.0 — timeout de segurança anti-loop
-  const spokenCache  = new Set();
-  const rawSeenCache = new Set();
+  const speakQueue    = [];
+  let   isSpeaking    = false;
+  const spokenCueIds  = new Set(); // dedup por trackId:startTime (v1.9.1)
+  const spokenCache   = new Set(); // dedup por texto traduzido
+  const rawSeenCache  = new Set(); // dedup pre-buffer
 
-  // FIX B (v1.6.0) — flag: Fonte 1 (TextTrack) esta ativa e disparando cues.
-  // Quando true, Fonte 2 (MutationObserver) ignora tudo para evitar duplicatas
-  // fragmentadas que causam loop e narrador atrasado em relacao a legenda.
-  // Resetado ao desligar/religar para garantir fallback em players sem TextTrack.
   let hasActiveTextTrack = false;
 
   // =========================================================================
-  // FIX 2 (v1.8.0) — BUFFER DE CHUNKS
-  // O player Brightcove/VJS emite cues fragmentados (1-2 linhas por evento).
-  // Acumulamos os fragmentos por CHUNK_BUFFER_MS e enviamos o texto junto,
-  // evitando que o TTS fale palavras cortadas no meio.
+  // BUFFER DE CHUNKS (v1.8.0)
   // =========================================================================
   const CHUNK_BUFFER_MS = 350;
   let chunkBuffer = [];
@@ -75,13 +57,7 @@
   // =========================================================================
   function safeSet(data) {
     chrome.storage.local.set(data, () => {
-      if (!chrome.runtime.lastError) return;
-      const msg = chrome.runtime.lastError.message ?? "";
-      if (msg.includes("QUOTA_BYTES") || msg.toLowerCase().includes("quota")) {
-        console.warn("[Oracle CC] Storage: cota estourada.", Object.keys(data).join(", "));
-      } else {
-        console.error("[Oracle CC] Storage erro:", msg);
-      }
+      if (chrome.runtime.lastError) {} // silencioso em producao
     });
   }
 
@@ -97,9 +73,7 @@
   chrome.storage.local.get(
     ["readerActive", "ttsVoice", "ttsVolume", "sourceLang"],
     (r) => {
-      if (chrome.runtime.lastError) {
-        console.error("[Oracle CC] Falha ao ler storage:", chrome.runtime.lastError.message);
-      } else {
+      if (!chrome.runtime.lastError) {
         if (r.readerActive !== undefined) isEnabled  = r.readerActive;
         if (r.ttsVoice     !== undefined) ttsVoice   = r.ttsVoice;
         if (r.ttsVolume    !== undefined) ttsVolume  = r.ttsVolume;
@@ -109,14 +83,12 @@
     }
   );
 
-  // Reage a mudancas do popup
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.readerActive) {
       isEnabled = changes.readerActive.newValue;
       if (!isEnabled) {
         speakQueue.length = 0;
         isSpeaking = false;
-        clearTimeout(safetyTimer);
         hasActiveTextTrack = false;
         chunkBuffer = [];
         clearTimeout(chunkTimer);
@@ -125,10 +97,10 @@
       } else {
         speakQueue.length = 0;
         isSpeaking = false;
-        clearTimeout(safetyTimer);
         hasActiveTextTrack = false;
         chunkBuffer = [];
         clearTimeout(chunkTimer);
+        spokenCueIds.clear();
         spokenCache.clear();
         rawSeenCache.clear();
         document.querySelectorAll("video").forEach(video => {
@@ -144,7 +116,6 @@
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === "TTS_DONE") {
-      clearTimeout(safetyTimer);
       isSpeaking = false;
       if (speakQueue.length === 0) safeSet({ readerStatus: "waiting" });
       drainQueue();
@@ -216,18 +187,16 @@
       const out  = json[0].map(s => s[0]).join("");
       translateCache.set(key, out);
       return out;
-    } catch (err) {
-      console.warn("[Oracle CC] Traducao falhou, usando original.", err.message);
+    } catch {
       return text;
     }
   }
 
   // =========================================================================
   // FILA TTS
+  // MAX_QUEUE_SIZE = 1 — narrador sempre no presente, sem acumulo de frases
   // =========================================================================
-
-  // Fix 1 (v1.8.0) — MAX_QUEUE_SIZE 1→3
-  const MAX_QUEUE_SIZE = 3;
+  const MAX_QUEUE_SIZE = 1;
 
   function enqueue(text) {
     const clean = text.replace(/\s+/g, " ").trim();
@@ -235,9 +204,7 @@
     spokenCache.add(clean);
     setTimeout(() => spokenCache.delete(clean), 30000);
 
-    while (speakQueue.length >= MAX_QUEUE_SIZE) {
-      speakQueue.shift();
-    }
+    while (speakQueue.length >= MAX_QUEUE_SIZE) speakQueue.shift();
 
     speakQueue.push(clean);
     drainQueue();
@@ -249,24 +216,12 @@
     const text = speakQueue.shift();
     safeSet({ readerStatus: "speaking" });
 
-    // v1.9.0 — timeout de segurança: se TTS_DONE nao chegar em 15s, desbloqueia
-    // Evita loop eterno quando o service worker cai ou a aba perde foco
-    safetyTimer = setTimeout(() => {
-      if (isSpeaking) {
-        console.warn("[Oracle CC] TTS_DONE nao chegou em 15s — desbloqueando isSpeaking");
-        isSpeaking = false;
-        drainQueue();
-      }
-    }, 15000);
-
     chrome.runtime.sendMessage({
       type:   "SPEAK",
       text,
       voice:  ttsVoice,
       volume: ttsVolume,
-    }).catch((err) => {
-      clearTimeout(safetyTimer);
-      console.warn("[Oracle CC] sendMessage falhou, re-enfileirando:", err.message);
+    }).catch(() => {
       isSpeaking = false;
       speakQueue.unshift(text);
       setTimeout(drainQueue, 500);
@@ -308,21 +263,29 @@
   }
 
   // =========================================================================
-  // FONTE 1 — TextTrack API (Brightcove/VJS)
+  // FONTE 1 — TextTrack API
+  // Dedup por cueId = "trackIndex:startTime" — imune a re-disparo do player
   // =========================================================================
   const observedTracks = new WeakSet();
   const observedVideos = new WeakSet();
 
-  function attachTrack(track, video) {
+  function attachTrack(track, video, trackIndex) {
     if (!track || observedTracks.has(track)) return;
     observedTracks.add(track);
     track.mode = "hidden";
+
     track.addEventListener("cuechange", () => {
       if (!isEnabled) return;
       const cues = track.activeCues;
       if (!cues || cues.length === 0) return;
+
       for (const cue of cues) {
         if (!cue?.text) continue;
+
+        // Dedup por identidade do cue — imune a re-disparo do player Oracle
+        const cueId = `${trackIndex ?? 0}:${cue.startTime}`;
+        if (spokenCueIds.has(cueId)) continue;
+        spokenCueIds.add(cueId);
 
         if (video) {
           const now = video.currentTime;
@@ -342,16 +305,17 @@
 
   function attachVideo(video) {
     if (!video) return;
-    for (const track of video.textTracks) attachTrack(track, video);
+    Array.from(video.textTracks).forEach((track, i) => attachTrack(track, video, i));
     if (observedVideos.has(video)) return;
     observedVideos.add(video);
     video.textTracks.addEventListener("addtrack", (e) => {
-      attachTrack(e?.track, video);
+      const i = Array.from(video.textTracks).indexOf(e?.track);
+      attachTrack(e?.track, video, i);
     });
   }
 
   // =========================================================================
-  // FONTE 2 — MutationObserver DOM (.vjs-text-track-cue fallback)
+  // FONTE 2 — MutationObserver DOM (fallback)
   // =========================================================================
   const CC_SELECTORS = [
     ".vjs-text-track-cue",
@@ -375,7 +339,6 @@
     if (domObserver) return;
     domObserver = new MutationObserver((mutations) => {
       if (hasActiveTextTrack) return;
-
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
           if (!node || node.nodeType !== Node.ELEMENT_NODE) continue;
@@ -419,7 +382,6 @@
     }
 
     startDOMObserver();
-
     if (isEnabled) safeSet({ readerStatus: "waiting" });
   }
 
