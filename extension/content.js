@@ -20,6 +20,8 @@
 //           Fix 2: buffer 350ms junta fragmentos do player antes de ir ao TTS
 //                  (resolve narrador comendo pedacos de palavras)
 //           Fix 5: ttsRate removido do content — background usa rate fixo=2.0
+// v1.9.0 — Fix loop: timeout de segurança 15s em drainQueue() para desbloquear
+//           isSpeaking caso TTS_DONE nunca chegue (ex: service worker caiu)
 
 (function () {
   if (window.__oracleCCLoaded) return;
@@ -35,6 +37,7 @@
 
   const speakQueue   = [];
   let   isSpeaking   = false;
+  let   safetyTimer  = null;  // v1.9.0 — timeout de segurança anti-loop
   const spokenCache  = new Set();
   const rawSeenCache = new Set();
 
@@ -113,6 +116,7 @@
       if (!isEnabled) {
         speakQueue.length = 0;
         isSpeaking = false;
+        clearTimeout(safetyTimer);
         hasActiveTextTrack = false;
         chunkBuffer = [];
         clearTimeout(chunkTimer);
@@ -121,6 +125,7 @@
       } else {
         speakQueue.length = 0;
         isSpeaking = false;
+        clearTimeout(safetyTimer);
         hasActiveTextTrack = false;
         chunkBuffer = [];
         clearTimeout(chunkTimer);
@@ -139,6 +144,7 @@
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === "TTS_DONE") {
+      clearTimeout(safetyTimer);
       isSpeaking = false;
       if (speakQueue.length === 0) safeSet({ readerStatus: "waiting" });
       drainQueue();
@@ -221,8 +227,6 @@
   // =========================================================================
 
   // Fix 1 (v1.8.0) — MAX_QUEUE_SIZE 1→3
-  // Permite 3 chunks na fila enquanto o TTS fala, reduzindo descarte de frases
-  // consecutivas que chegam no intervalo entre um cue e outro.
   const MAX_QUEUE_SIZE = 3;
 
   function enqueue(text) {
@@ -244,12 +248,24 @@
     isSpeaking = true;
     const text = speakQueue.shift();
     safeSet({ readerStatus: "speaking" });
+
+    // v1.9.0 — timeout de segurança: se TTS_DONE nao chegar em 15s, desbloqueia
+    // Evita loop eterno quando o service worker cai ou a aba perde foco
+    safetyTimer = setTimeout(() => {
+      if (isSpeaking) {
+        console.warn("[Oracle CC] TTS_DONE nao chegou em 15s — desbloqueando isSpeaking");
+        isSpeaking = false;
+        drainQueue();
+      }
+    }, 15000);
+
     chrome.runtime.sendMessage({
       type:   "SPEAK",
       text,
       voice:  ttsVoice,
       volume: ttsVolume,
     }).catch((err) => {
+      clearTimeout(safetyTimer);
       console.warn("[Oracle CC] sendMessage falhou, re-enfileirando:", err.message);
       isSpeaking = false;
       speakQueue.unshift(text);
@@ -259,9 +275,6 @@
 
   // =========================================================================
   // PIPELINE PRINCIPAL
-  // Recebe texto bruto de qualquer fonte, filtra, traduz se necessario,
-  // e chama enqueue. Chamado pelo buffer de chunks (pipelineFinal) ou
-  // diretamente quando o sourceLang ja e conhecido como 'pt'.
   // =========================================================================
   async function pipelineFinal(raw) {
     if (!isEnabled) return;
@@ -286,9 +299,6 @@
     enqueue(final);
   }
 
-  // pipeline() — entrada publica de todas as fontes.
-  // Filtra elemento de UI, adiciona ao rawSeenCache parcial (pre-buffer)
-  // e encaminha para o buffer de chunks.
   function pipeline(text, sourceEl) {
     if (!isEnabled) return;
     const raw = text?.trim();
@@ -342,7 +352,6 @@
 
   // =========================================================================
   // FONTE 2 — MutationObserver DOM (.vjs-text-track-cue fallback)
-  // FIX B (v1.6.0) — silenciado quando hasActiveTextTrack === true
   // =========================================================================
   const CC_SELECTORS = [
     ".vjs-text-track-cue",

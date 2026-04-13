@@ -19,6 +19,10 @@
 //   rate fixo = 2.0 (hardcoded aqui, removido do popup e do content.js).
 //   Velocidade 2x sincroniza melhor o narrador com as legendas fragmentadas
 //   do player Brightcove/VJS. Sem controle externo, sem risco de dessincronizar.
+//
+// v1.9.0:
+//   Fix loop isSpeaking: TTS_DONE agora vai para sender.tab.id em vez de tabs[0].id.
+//   Fix voz errada: speakWithBestVoice() usa getVoices() + match exato/fuzzy antes de falar.
 
 // Taxa de fala fixa — nao exposta no popup (v1.8.0)
 const TTS_RATE = 2.0;
@@ -69,34 +73,70 @@ function notifyTab(tabId, payload) {
   chrome.tabs.sendMessage(tabId, payload).catch(() => {});
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg.type === "SPEAK") {
-    const { lang, voiceName } = resolveVoice(msg.voice);
+/**
+ * v1.9.0 — speakWithBestVoice
+ * Antes de falar, lista as vozes instaladas e tenta:
+ *   1. Match exato pelo voiceName salvo no storage
+ *   2. Match fuzzy: voiceName contem o nome da voz desejada (ex: "antonio")
+ *   3. Se nao achar nada, usa apenas lang sem voiceName (evita fallback feminino)
+ */
+function speakWithBestVoice(text, voiceValue, ttsOptions, tabId) {
+  const { lang, voiceName: resolvedName } = resolveVoice(voiceValue);
+  ttsOptions.lang = lang;
 
-    const ttsOptions = {
-      lang,
-      rate:   TTS_RATE,
-      volume: msg.volume ?? 1.0,
+  chrome.tts.getVoices((voices) => {
+    const ptVoices = voices.filter(v => v.lang?.startsWith("pt"));
+
+    // Match exato
+    let matched = ptVoices.find(v => v.voiceName === resolvedName);
+
+    // Match fuzzy: procura pelo nome dentro do voiceName (case-insensitive)
+    if (!matched && resolvedName) {
+      const needle = resolvedName.toLowerCase();
+      matched = ptVoices.find(v => v.voiceName?.toLowerCase().includes(
+        // extrai a parte humana do nome (ex: "antonio" de "pt-BR-AntonioNeural")
+        needle.replace(/^pt-br-|^pt-pt-|^pt-/i, "").replace(/neural$/i, "")
+      ));
+    }
+
+    if (matched) {
+      ttsOptions.voiceName = matched.voiceName;
+      ttsOptions.lang      = matched.lang ?? lang;
+    } else if (resolvedName) {
+      // Passa o voiceName original como ultima tentativa
+      ttsOptions.voiceName = resolvedName;
+    }
+    // Se nao achou nada, nao seta voiceName — chrome.tts escolhe a melhor para lang
+
+    chrome.tts.stop();
+    chrome.tts.speak(text, {
+      ...ttsOptions,
       onEvent: (ev) => {
         if (ev.type === "end" || ev.type === "cancelled") {
-          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs[0]?.id) notifyTab(tabs[0].id, { type: "TTS_DONE" });
-          });
+          if (tabId) notifyTab(tabId, { type: "TTS_DONE" });
         }
         if (ev.type === "error") {
           const code = ev.errorMessage ?? "unknown";
-          console.error(`[Oracle CC BG] TTS erro: ${code} | lang:${lang} voiceName:${voiceName ?? "auto"}`);
-          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs[0]?.id) notifyTab(tabs[0].id, { type: "TTS_DONE", error: code });
-          });
+          console.error(`[Oracle CC BG] TTS erro: ${code} | lang:${ttsOptions.lang} voiceName:${ttsOptions.voiceName ?? "auto"}`);
+          if (tabId) notifyTab(tabId, { type: "TTS_DONE", error: code });
         }
       }
+    });
+  });
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // v1.9.0: usa sender.tab.id para garantir que TTS_DONE vai para a aba certa
+  // (antes usava tabs[0].id que podia ser o popup quando ele estava aberto)
+  const senderTabId = sender?.tab?.id ?? null;
+
+  if (msg.type === "SPEAK") {
+    const ttsOptions = {
+      rate:   TTS_RATE,
+      volume: msg.volume ?? 1.0,
     };
 
-    if (voiceName) ttsOptions.voiceName = voiceName;
-
-    chrome.tts.stop();
-    chrome.tts.speak(msg.text, ttsOptions);
+    speakWithBestVoice(msg.text, msg.voice, ttsOptions, senderTabId);
 
     sendResponse({ ok: true });
     return true;
